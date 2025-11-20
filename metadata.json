@@ -1,0 +1,8 @@
+{
+  "name": "Chatroom",
+  "description": "A reactive, mobile-first social media application featuring real-time chat, feed browsing, and media uploads.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}

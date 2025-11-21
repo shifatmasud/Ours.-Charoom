@@ -1,3 +1,4 @@
+
 import { createClient } from '@supabase/supabase-js';
 import { Post, Message, Notification, Profile, CurrentUser, Comment } from '../types';
 
@@ -74,16 +75,42 @@ const MOCK_MESSAGES: Message[] = [
 
 const MOCK_FOLLOWS = new Set<string>(); // Format: "followerId:targetId"
 
+// Helper for mock auth persistence
+const getMockAuth = () => localStorage.getItem('mock_auth') === 'true';
+
 // --- Service Layer ---
 
 export const api = {
+  // Auth
   signInWithGoogle: async (): Promise<void> => {
       if (supabase) {
           await supabase.auth.signInWithOAuth({ provider: 'google' });
       } else {
-          // Mock login delay
+          // Mock login
           await new Promise(r => setTimeout(r, 800));
+          localStorage.setItem('mock_auth', 'true');
       }
+  },
+
+  signInWithPassword: async (id: string, pass: string): Promise<CurrentUser> => {
+    if (supabase) {
+      const { data: { user }, error } = await supabase.auth.signInWithPassword({ email: id, password: pass });
+      if (error) throw error;
+      return MOCK_USER; // Simplified for real supabase scenario
+    }
+    
+    // Mock Check
+    await new Promise(r => setTimeout(r, 600));
+    if (id === 'root' && pass === 'root') {
+       localStorage.setItem('mock_auth', 'true');
+       return MOCK_USER;
+    }
+    throw new Error("Invalid Credentials");
+  },
+
+  signOut: async (): Promise<void> => {
+    if (supabase) await supabase.auth.signOut();
+    localStorage.removeItem('mock_auth');
   },
 
   getCurrentUser: async (): Promise<CurrentUser> => {
@@ -93,6 +120,8 @@ export const api = {
       const { data } = await supabase.from('profiles').select('*').eq('id', user.id).single();
       return data;
     }
+    
+    if (!getMockAuth()) throw new Error("Not Authenticated");
     return { ...MOCK_USER };
   },
 

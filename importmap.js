@@ -6,6 +6,9 @@ const importMap = {
     "framer-motion": "https://esm.sh/framer-motion@11.0.3",
     "@phosphor-icons/react": "https://esm.sh/@phosphor-icons/react@2.0.15",
     "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2.39.3",
+    "three": "https://esm.sh/three@0.160.0",
+    "gsap": "https://esm.sh/gsap@3.12.5",
+    "@google/genai": "https://esm.sh/@google/genai@0.1.1",
     "clsx": "https://esm.sh/clsx@2.1.0",
     "tailwind-merge": "https://esm.sh/tailwind-merge@2.2.1",
     "date-fns": "https://esm.sh/date-fns@3.3.1"

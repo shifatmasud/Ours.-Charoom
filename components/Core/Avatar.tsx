@@ -1,5 +1,6 @@
+
 import React from 'react';
-import { theme } from '../../Theme';
+import { DS } from '../../Theme';
 
 interface AvatarProps {
   src: string;
@@ -11,7 +12,7 @@ interface AvatarProps {
 
 export const Avatar: React.FC<AvatarProps> = ({ src, alt, size = 'md', bordered = false, style }) => {
   const sizeMap = {
-    sm: '36px',
+    sm: '32px',
     md: '48px',
     lg: '72px',
     xl: '100px',
@@ -20,12 +21,12 @@ export const Avatar: React.FC<AvatarProps> = ({ src, alt, size = 'md', bordered 
   const wrapperStyle: React.CSSProperties = {
     width: sizeMap[size],
     height: sizeMap[size],
-    borderRadius: theme.radius.full,
+    borderRadius: DS.Radius.Full,
     overflow: 'hidden',
-    backgroundColor: theme.colors.surface3,
+    backgroundColor: DS.Color.Base.Surface[3],
     flexShrink: 0,
     padding: bordered ? '3px' : '0',
-    background: bordered ? `linear-gradient(135deg, ${theme.colors.accent}, #FF0000)` : undefined,
+    background: bordered ? `linear-gradient(135deg, ${DS.Color.Accent.Surface}, #FF0000)` : undefined,
     ...style,
   };
 
@@ -33,8 +34,8 @@ export const Avatar: React.FC<AvatarProps> = ({ src, alt, size = 'md', bordered 
     width: '100%',
     height: '100%',
     objectFit: 'cover',
-    borderRadius: theme.radius.full,
-    border: bordered ? `2px solid ${theme.colors.surface1}` : 'none',
+    borderRadius: DS.Radius.Full,
+    border: bordered ? `2px solid ${DS.Color.Base.Surface[1]}` : 'none',
     display: 'block',
   };
 

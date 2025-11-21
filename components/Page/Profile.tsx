@@ -99,9 +99,9 @@ export const Profile: React.FC = () => {
   const isMyProfile = profileUser.id === currentUser.id;
 
   return (
-    <motion.div 
+    // Removed motion page transitions from root to keep header static
+    <div 
       style={commonStyles.pageContainer}
-      {...theme.motion.page}
     >
       <div style={{ width: '100%', maxWidth: theme.layout.maxWidth, paddingBottom: '180px' }}>
         
@@ -112,22 +112,15 @@ export const Profile: React.FC = () => {
              </button>
         </div>
 
-        {/* Profile Header */}
+        {/* Profile Header - Static without animations */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '0 24px 32px 24px' }}>
             
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              transition={theme.motion.gentle}
-            >
+            <div>
               <Avatar src={profileUser.avatar_url} alt={profileUser.username} size="xl" bordered style={{ width: '110px', height: '110px', marginBottom: '24px' }} />
-            </motion.div>
+            </div>
             
             {/* Stats with Slot Counters */}
-            <motion.div 
-              initial={{ y: 20, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              transition={{ delay: 0.1, ...theme.motion.gentle }}
+            <div 
               style={{ display: 'flex', gap: '40px', marginBottom: '32px' }}
             >
               <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
@@ -148,12 +141,11 @@ export const Profile: React.FC = () => {
                 </div>
                 <span style={{ fontSize: '11px', color: theme.colors.text3, textTransform: 'uppercase', letterSpacing: '1px' }}>Following</span>
               </div>
-            </motion.div>
+            </div>
 
             {/* User Info & Actions */}
             <div style={{ width: '100%' }}>
-                <motion.div 
-                  layout
+                <div 
                   style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', gap: '24px' }}
                 >
                   <div>
@@ -211,7 +203,7 @@ export const Profile: React.FC = () => {
                       </button>
                     </div>
                   )}
-                </motion.div>
+                </div>
             </div>
         </div>
 
@@ -338,6 +330,6 @@ export const Profile: React.FC = () => {
         </AnimatePresence>,
         document.body
       )}
-    </motion.div>
+    </div>
   );
 };

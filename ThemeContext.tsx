@@ -1,6 +1,6 @@
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { themeConfigs } from './Theme';
+import { Palettes } from './Theme';
 
 type ThemeMode = 'dark' | 'light';
 
@@ -18,28 +18,28 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   useEffect(() => {
     const root = document.documentElement;
-    const config = themeConfigs[mode];
+    const palette = mode === 'dark' ? Palettes.Dark : Palettes.Light;
     
-    root.style.setProperty('--surface-1', config.surface1);
-    root.style.setProperty('--surface-2', config.surface2);
-    root.style.setProperty('--surface-3', config.surface3);
-    root.style.setProperty('--text-1', config.text1);
-    root.style.setProperty('--text-2', config.text2);
-    root.style.setProperty('--text-3', config.text3);
-    root.style.setProperty('--accent', config.accent);
-    root.style.setProperty('--danger', config.danger);
-    root.style.setProperty('--border', config.border);
-    root.style.setProperty('--glass', config.glass);
-    root.style.setProperty('--input-bg', config.inputBg);
+    // Map Palette to CSS Variables for DS
+    root.style.setProperty('--ds-surface-1', palette.Surface1);
+    root.style.setProperty('--ds-surface-2', palette.Surface2);
+    root.style.setProperty('--ds-surface-3', palette.Surface3);
+    root.style.setProperty('--ds-content-1', palette.Content1);
+    root.style.setProperty('--ds-content-2', palette.Content2);
+    root.style.setProperty('--ds-content-3', palette.Content3);
+    root.style.setProperty('--ds-accent', palette.Accent);
+    root.style.setProperty('--ds-error', palette.Error);
+    root.style.setProperty('--ds-border', palette.Border);
+    root.style.setProperty('--ds-glass', palette.Glass);
     
-    // Meta theme color update for browser chrome integration
+    // Meta theme color update
     const metaThemeColor = document.querySelector('meta[name="theme-color"]');
     if (metaThemeColor) {
-        metaThemeColor.setAttribute('content', config.surface1);
+        metaThemeColor.setAttribute('content', palette.Surface1);
     } else {
         const meta = document.createElement('meta');
         meta.name = "theme-color";
-        meta.content = config.surface1;
+        meta.content = palette.Surface1;
         document.head.appendChild(meta);
     }
   }, [mode]);

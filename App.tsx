@@ -1,6 +1,5 @@
-
 import React from 'react';
-import { HashRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
+import { HashRouter as Router, Routes, Route, useLocation, Navigate } from 'react-router-dom';
 import { Feed } from './components/Section/Feed';
 import { Nav } from './components/Package/Nav';
 import { ChatWindow } from './components/Section/ChatWindow';
@@ -12,6 +11,27 @@ import { GroupCall } from './components/Page/GroupCall';
 import { theme } from './Theme';
 import { ThemeProvider } from './ThemeContext';
 import { AnimatePresence } from 'framer-motion';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { CircleNotch } from '@phosphor-icons/react';
+
+// --- Auth Guard ---
+const RequireAuth = ({ children }: { children?: React.ReactNode }) => {
+    const { user, loading } = useAuth();
+    
+    if (loading) {
+        return (
+            <div style={{ height: '100vh', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: theme.colors.surface1 }}>
+                <CircleNotch size={32} className="animate-spin" color={theme.colors.accent} />
+            </div>
+        );
+    }
+
+    if (!user) {
+        return <Navigate to="/login" replace />;
+    }
+
+    return <>{children}</>;
+};
 
 const AnimatedRoutes = () => {
   const location = useLocation();
@@ -20,18 +40,22 @@ const AnimatedRoutes = () => {
     <AnimatePresence mode="wait">
       <Routes location={location} key={location.pathname}>
         <Route path="/login" element={<Login />} />
-        <Route path="/" element={<Feed />} />
-        <Route path="/profile/:userId" element={<Profile />} />
-        <Route path="/messages" element={<MessagesList />} />
-        <Route path="/messages/:friendId" element={<ChatWindow />} />
-        <Route path="/live" element={<LiveCall />} />
-        <Route path="/call/:roomId" element={<GroupCall />} />
+        
+        {/* Protected Routes */}
+        <Route path="/" element={<RequireAuth><Feed /></RequireAuth>} />
+        <Route path="/profile/:userId" element={<RequireAuth><Profile /></RequireAuth>} />
+        <Route path="/messages" element={<RequireAuth><MessagesList /></RequireAuth>} />
+        <Route path="/messages/:friendId" element={<RequireAuth><ChatWindow /></RequireAuth>} />
+        <Route path="/live" element={<RequireAuth><LiveCall /></RequireAuth>} />
+        <Route path="/call/:roomId" element={<RequireAuth><GroupCall /></RequireAuth>} />
       </Routes>
     </AnimatePresence>
   );
 };
 
 const AppLayout: React.FC = () => {
+  const { user } = useAuth();
+  
   return (
     <div style={{ 
       fontFamily: theme.fonts.body, 
@@ -44,7 +68,8 @@ const AppLayout: React.FC = () => {
       transition: 'background-color 0.6s cubic-bezier(0.22, 1, 0.36, 1), color 0.6s cubic-bezier(0.22, 1, 0.36, 1)'
     }}>
       <AnimatedRoutes />
-      <Nav />
+      {/* Only show Nav if logged in and not on login page (handled by Nav internal check mostly, but safer here too) */}
+      {user && <Nav />}
     </div>
   );
 };
@@ -52,9 +77,11 @@ const AppLayout: React.FC = () => {
 const App: React.FC = () => {
   return (
     <ThemeProvider>
-      <Router>
-        <AppLayout />
-      </Router>
+      <AuthProvider>
+        <Router>
+          <AppLayout />
+        </Router>
+      </AuthProvider>
     </ThemeProvider>
   );
 };

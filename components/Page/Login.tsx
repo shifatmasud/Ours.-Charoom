@@ -1,18 +1,29 @@
+
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { theme, commonStyles } from '../../Theme';
+import { DS } from '../../Theme';
 import { api } from '../../services/supabaseClient';
 import { useNavigate } from 'react-router-dom';
-import { GoogleLogo } from '@phosphor-icons/react';
+import { GoogleLogo, User, Key, SignIn } from '@phosphor-icons/react';
+import { Button } from '../Core/Button';
+import { Input } from '../Core/Input';
+import { useAuth } from '../../contexts/AuthContext';
 
 export const Login: React.FC = () => {
   const navigate = useNavigate();
+  const { refreshAuth } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState('');
+  
+  // Form State
+  const [userId, setUserId] = useState('');
+  const [password, setPassword] = useState('');
 
-  const handleLogin = async () => {
+  const handleGoogleLogin = async () => {
     setIsLoading(true);
     try {
       await api.signInWithGoogle();
+      await refreshAuth();
       navigate('/');
     } catch (error) {
       console.error("Login failed", error);
@@ -21,87 +32,135 @@ export const Login: React.FC = () => {
     }
   };
 
+  const handleDirectLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+    setError('');
+    try {
+        await api.signInWithPassword(userId, password);
+        await refreshAuth();
+        navigate('/');
+    } catch (err: any) {
+        setError(err.message || 'Access Denied');
+    } finally {
+        setIsLoading(false);
+    }
+  };
+
   return (
     <div style={{ 
-      ...commonStyles.pageContainer, 
-      background: `radial-gradient(circle at 50% 100%, #1a0a0a, ${theme.colors.surface1})` 
+      height: '100vh', 
+      width: '100%', 
+      background: '#000000', // Strict void
+      display: 'flex', 
+      flexDirection: 'column', 
+      alignItems: 'center', 
+      justifyContent: 'center',
+      color: '#FFFFFF'
     }}>
-      <div style={{ 
-        display: 'flex', 
-        flexDirection: 'column', 
-        alignItems: 'center', 
-        justifyContent: 'center', 
-        height: '100vh',
-        width: '100%',
-        padding: '24px',
-        maxWidth: '400px'
-      }}>
+      
+      {/* Floating Particles Background Effect */}
+      <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none' }}>
+         {[...Array(20)].map((_, i) => (
+            <motion.div
+              key={i}
+              initial={{ 
+                x: Math.random() * window.innerWidth, 
+                y: Math.random() * window.innerHeight,
+                opacity: 0.1,
+                scale: Math.random() * 0.5 + 0.5
+              }}
+              animate={{ 
+                y: [null, Math.random() * window.innerHeight],
+                opacity: [0.1, 0.3, 0.1]
+              }}
+              transition={{ duration: 10 + Math.random() * 20, repeat: Infinity, ease: "linear" }}
+              style={{
+                position: 'absolute',
+                width: '4px',
+                height: '4px',
+                borderRadius: '50%',
+                background: DS.Color.Accent.Surface
+              }}
+            />
+         ))}
+      </div>
+
+      <div style={{ maxWidth: '360px', padding: '24px', width: '100%', textAlign: 'center', position: 'relative', zIndex: 10 }}>
         
         <motion.div
-          initial={{ scale: 0.8, opacity: 0, filter: 'blur(10px)' }}
-          animate={{ scale: 1, opacity: 1, filter: 'blur(0px)' }}
-          transition={{ duration: 1, ease: [0.22, 1, 0.36, 1] }}
-          style={{ marginBottom: '48px', textAlign: 'center' }}
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.8, ease: [0.25, 0.1, 0.25, 1] }}
+          style={{ marginBottom: '48px' }}
         >
           <h1 style={{ 
-            fontSize: '64px', 
-            color: theme.colors.text1, 
-            letterSpacing: '2px',
-            marginBottom: '16px'
+            fontSize: '80px', 
+            letterSpacing: '-2px',
+            lineHeight: 0.9,
+            fontFamily: DS.Type.Expressive.Display.fontFamily
           }}>
-            Ours<span style={{ color: theme.colors.accent }}>.</span>
+            OURS<span style={{ color: DS.Color.Accent.Surface }}>.</span>
           </h1>
           <p style={{ 
-            color: theme.colors.text2, 
+            color: DS.Color.Base.Content[3], 
             fontSize: '16px', 
-            fontFamily: theme.fonts.raw 
+            marginTop: '16px',
+            fontFamily: DS.Type.Expressive.Quote.fontFamily
           }}>
-            Welcome home.
+            Enter the void.
           </p>
         </motion.div>
 
-        <motion.button
-          whileHover={{ scale: 1.02, backgroundColor: 'rgba(255,255,255,0.1)' }}
-          whileTap={{ scale: 0.98 }}
-          onClick={handleLogin}
-          disabled={isLoading}
-          style={{
-            width: '100%',
-            padding: '16px 24px',
-            borderRadius: theme.radius.full,
-            background: 'rgba(255,255,255,0.05)',
-            border: `1px solid ${theme.colors.border}`,
-            color: theme.colors.text1,
-            fontSize: '16px',
-            fontWeight: 500,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '12px',
-            cursor: 'pointer',
-            backdropFilter: 'blur(12px)',
-            boxShadow: theme.shadow.soft,
-            position: 'relative',
-            overflow: 'hidden'
+        <form onSubmit={handleDirectLogin} style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '24px' }}>
+           <Input 
+              placeholder="User ID" 
+              icon={<User size={20} />}
+              value={userId}
+              onChange={e => setUserId(e.target.value)}
+              style={{ background: 'rgba(255,255,255,0.05)' }}
+           />
+           <Input 
+              type="password"
+              placeholder="Password" 
+              icon={<Key size={20} />}
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              style={{ background: 'rgba(255,255,255,0.05)' }}
+           />
+           
+           {error && <p style={{ color: DS.Color.Status.Error, fontSize: '13px' }}>{error}</p>}
+
+           <Button variant="primary" size="lg" type="submit" disabled={isLoading} style={{ width: '100%' }}>
+              {isLoading ? 'Processing...' : (
+                  <>
+                     <SignIn size={20} weight="fill" />
+                     LOG IN
+                  </>
+              )}
+           </Button>
+        </form>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', margin: '24px 0', opacity: 0.5 }}>
+           <div style={{ height: '1px', flex: 1, background: DS.Color.Base.Border }}></div>
+           <span style={{ fontSize: '12px', color: DS.Color.Base.Content[3] }}>OR</span>
+           <div style={{ height: '1px', flex: 1, background: DS.Color.Base.Border }}></div>
+        </div>
+
+        <Button 
+          variant="secondary" 
+          size="lg" 
+          onClick={handleGoogleLogin}
+          style={{ 
+            width: '100%', 
+            background: 'transparent', 
+            color: 'white',
+            border: '1px solid rgba(255,255,255,0.2)' 
           }}
         >
-          {isLoading ? (
-             <motion.div 
-               animate={{ rotate: 360 }} 
-               transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-               style={{ width: '20px', height: '20px', borderRadius: '50%', border: `2px solid ${theme.colors.text3}`, borderTopColor: theme.colors.text1 }} 
-             />
-          ) : (
-             <>
-               <GoogleLogo weight="bold" size={20} />
-               <span>Continue with Google</span>
-             </>
-          )}
-        </motion.button>
-
-        <div style={{ marginTop: '32px', fontSize: '12px', color: theme.colors.text3, textAlign: 'center', lineHeight: 1.5 }}>
-          By entering, you agree to remain chill <br/> and respect the void.
-        </div>
+          <GoogleLogo weight="bold" size={20} />
+          Sign in with Google
+        </Button>
 
       </div>
     </div>

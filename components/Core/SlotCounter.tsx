@@ -1,3 +1,4 @@
+
 import React, { useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -18,16 +19,13 @@ export const SlotCounter: React.FC<SlotCounterProps> = ({
   lineHeight = 1,
   letterSpacing = 'normal'
 }) => {
-  // Track history for direction
-  const prevValueRef = useRef<string | number>(value);
+  // Initialize prevValueRef to 0 if value is a number to ensure "count up" animation on mount
+  const prevValueRef = useRef<string | number>(typeof value === 'number' ? 0 : value);
   const directionRef = useRef<number>(1);
 
   const currentStr = String(value);
   const prevStr = String(prevValueRef.current);
-  
-  // Smart Direction Logic:
-  // Try to parse as numbers to determine if the total value is increasing or decreasing.
-  // This ensures that 9 -> 10 rolls UP (because 10 > 9), rather than mixed signals.
+
   const currentNum = parseFloat(currentStr.replace(/[^0-9.-]+/g, ''));
   const prevNum = parseFloat(prevStr.replace(/[^0-9.-]+/g, ''));
 
@@ -39,43 +37,36 @@ export const SlotCounter: React.FC<SlotCounterProps> = ({
     prevValueRef.current = value;
   }, [value]);
 
-  // Algorithm: Right-Align Diffing
-  // We want to align the 'units' column, 'tens' column, etc. regardless of length changes.
   const columns = useMemo(() => {
     const currChars = currentStr.split('');
     const prevChars = prevStr.split('');
-    
     const maxLen = Math.max(currChars.length, prevChars.length);
-    
-    // Pad the START of the array with nulls to align the ENDs (Units place)
-    // 100 vs 99 -> [1, 0, 0] vs [null, 9, 9]
     const padded = Array(maxLen - currChars.length).fill(null).concat(currChars);
     return padded;
   }, [currentStr, prevStr]);
 
   return (
-    <div style={{ 
-      display: 'flex', alignItems: 'center', 
+    <div style={{
+      display: 'flex', alignItems: 'center',
       fontSize, fontWeight, color, lineHeight, letterSpacing,
-      fontVariantNumeric: 'tabular-nums', 
+      fontVariantNumeric: 'tabular-nums',
       overflow: 'hidden', whiteSpace: 'pre',
       position: 'relative'
     }}>
-      {/* Accessibility: Read full value, hide mechanical bits */}
-      <span style={{ 
-        position: 'absolute', width: 1, height: 1, padding: 0, margin: -1, 
-        overflow: 'hidden', clip: 'rect(0, 0, 0, 0)', whiteSpace: 'nowrap', border: 0 
+      <span style={{
+        position: 'absolute', width: 1, height: 1, padding: 0, margin: -1,
+        overflow: 'hidden', clip: 'rect(0, 0, 0, 0)', whiteSpace: 'nowrap', border: 0
       }}>
         {value}
       </span>
 
       <div aria-hidden="true" style={{ display: 'flex' }}>
         {columns.map((char, index) => (
-           // Key based on power/position from right ensures stable identity during length changes
-           <SlotColumn 
+           <SlotColumn
              key={`col-${columns.length - 1 - index}`}
              char={char}
              direction={directionRef.current}
+             index={index}
            />
         ))}
       </div>
@@ -83,61 +74,63 @@ export const SlotCounter: React.FC<SlotCounterProps> = ({
   );
 };
 
-const SlotColumn: React.FC<{ char: string | null, direction: number }> = ({ char, direction }) => {
+const SlotColumn: React.FC<{ char: string | null, direction: number, index: number }> = ({ char, direction, index }) => {
   const displayChar = char === null ? '' : char;
-  
+
   return (
-    <div style={{ 
-      position: 'relative', 
-      display: 'inline-flex', 
-      justifyContent: 'center', 
+    <div style={{
+      position: 'relative',
+      display: 'inline-flex',
+      justifyContent: 'center',
       overflow: 'visible',
-      minWidth: displayChar === ' ' ? '0.3em' : undefined // Handle space explicitly
+      minWidth: displayChar === ' ' ? '0.3em' : undefined,
+      height: '1.2em'
     }}>
-      {/* Invisible spacer for layout stability - defines width */}
-      <span style={{ opacity: 0, visibility: 'hidden' }}>{displayChar}</span>
-      
-      {/* Absolute positioned animated character */}
+      {/* Invisible spacer */}
+      <span style={{ opacity: 0, visibility: 'hidden' }}>{displayChar || '0'}</span>
+
       <AnimatePresence mode="popLayout" custom={direction}>
         <motion.span
           key={displayChar}
           custom={direction}
           variants={{
-            initial: (dir) => ({ 
-              y: dir > 0 ? '100%' : '-100%', 
-              opacity: 0, 
-              filter: 'blur(4px)',
-              scale: 0.8 
+            initial: (dir) => ({
+              y: dir > 0 ? '100%' : '-100%',
+              opacity: 0,
+              scale: 0.5,
+              filter: 'blur(4px)'
             }),
-            animate: { 
-              y: '0%', 
-              opacity: 1, 
-              filter: 'blur(0px)',
-              scale: 1 
+            animate: {
+              y: '0%',
+              opacity: 1,
+              scale: 1,
+              filter: 'blur(0px)'
             },
-            exit: (dir) => ({ 
-              y: dir > 0 ? '-100%' : '100%', 
-              opacity: 0, 
+            exit: (dir) => ({
+              y: dir > 0 ? '-100%' : '100%',
+              opacity: 0,
+              scale: 0.5,
               filter: 'blur(4px)',
-              scale: 0.8,
-              position: 'absolute' 
+              position: 'absolute'
             })
           }}
           initial="initial"
           animate="animate"
           exit="exit"
-          transition={{ 
-            y: { type: "spring", stiffness: 280, damping: 22, mass: 0.3 }, // Snappy mechanical feel
-            opacity: { duration: 0.15 },
-            filter: { duration: 0.15 }
+          transition={{
+            y: { type: "spring", stiffness: 150, damping: 18, mass: 1 },
+            opacity: { duration: 0.2 },
+            scale: { duration: 0.2 },
+            filter: { duration: 0.2 },
+            delay: index * 0.08, // Stagger effect
           }}
-          style={{ 
-            position: 'absolute', 
-            inset: 0, 
-            display: 'flex', 
-            alignItems: 'center', 
+          style={{
+            position: 'absolute',
+            inset: 0,
+            display: 'flex',
+            alignItems: 'center',
             justifyContent: 'center',
-            willChange: 'transform, opacity, filter'
+            willChange: 'transform, filter, opacity'
           }}
         >
           {displayChar}

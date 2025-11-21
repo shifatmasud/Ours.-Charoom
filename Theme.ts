@@ -1,115 +1,182 @@
 
-export const themeConfigs = {
-  dark: {
-    surface1: '#000000', // Pure Black
-    surface2: '#18181B', // Zinc 900 - Distinct from black
-    surface3: '#27272A', // Zinc 800 - Card/Elevated
-    text1: '#FFFFFF',    // High Emphasis
-    text2: '#E4E4E7',    // Zinc 200 - High readability (>10:1)
-    text3: '#A1A1AA',    // Zinc 400 - Medium readability (>4.5:1)
-    accent: '#FF4F1F',   // High Vis Orange-Red
-    danger: '#EF4444',   // Red 500
-    border: 'rgba(255, 255, 255, 0.15)',
-    glass: 'rgba(24, 24, 27, 0.85)', 
-    inputBg: 'rgba(255, 255, 255, 0.08)',  // Soft Translucent Glassy for Dark Mode
+// --- Tier 2: Design System ---
+
+export const Palettes = {
+  Dark: {
+    Surface1: '#000000', // Pure Void
+    Surface2: '#111111', // Near Void
+    Surface3: '#1F1F1F', // Elevated
+    Content1: '#FFFFFF', // Pure Light
+    Content2: '#A1A1AA', // Dimmed
+    Content3: '#52525B', // Muted
+    Accent: '#FF4F1F',   // Electric Orange
+    Error: '#FF3333',
+    Border: 'rgba(255,255,255,0.12)',
+    Glass: 'rgba(0,0,0,0.6)'
   },
-  light: {
-    surface1: '#FFFFFF', // Pure White
-    surface2: '#F4F4F5', // Zinc 100
-    surface3: '#E4E4E7', // Zinc 200
-    text1: '#09090B',    // Zinc 950 - High Emphasis
-    text2: '#3F3F46',    // Zinc 700 - Much darker for readability
-    text3: '#52525B',    // Zinc 600 - accessible gray
-    accent: '#D02A00',   // Deep Orange
-    danger: '#DC2626',   // Red 600
-    border: 'rgba(0, 0, 0, 0.12)',
-    glass: 'rgba(255, 255, 255, 0.9)', 
-    inputBg: 'rgba(0, 0, 0, 0.05)',  // Soft Translucent Glassy for Light Mode
+  Light: {
+    Surface1: '#FFFFFF', // Pure Light
+    Surface2: '#F4F4F5', // Soft Grey
+    Surface3: '#E4E4E7', // Structure
+    Content1: '#09090B', // Ink
+    Content2: '#52525B', // Pencil
+    Content3: '#A1A1AA', // Ghost
+    Accent: '#FF4F1F',   // Electric Orange
+    Error: '#DC2626',
+    Border: 'rgba(0,0,0,0.08)',
+    Glass: 'rgba(255,255,255,0.8)'
   }
 };
 
-export const theme = {
-  colors: {
-    surface1: 'var(--surface-1)',
-    surface2: 'var(--surface-2)',
-    surface3: 'var(--surface-3)',
-    text1: 'var(--text-1)',
-    text2: 'var(--text-2)',
-    text3: 'var(--text-3)',
-    accent: 'var(--accent)',
-    accentHover: 'var(--accent)',
-    glass: 'var(--glass)',
-    inputBg: 'var(--input-bg)',
-    border: 'var(--border)',
-    danger: 'var(--danger)',
-    overlay: 'rgba(0,0,0,0.8)',
+// Semantic Token Mapping
+export const DS = {
+  Color: {
+    Base: {
+      Surface: {
+        1: 'var(--ds-surface-1)',
+        2: 'var(--ds-surface-2)',
+        3: 'var(--ds-surface-3)',
+      },
+      Content: {
+        1: 'var(--ds-content-1)',
+        2: 'var(--ds-content-2)',
+        3: 'var(--ds-content-3)',
+      },
+      Border: 'var(--ds-border)',
+      Glass: 'var(--ds-glass)',
+    },
+    Accent: {
+      Surface: 'var(--ds-accent)',
+      Content: '#FFFFFF',
+    },
+    Status: {
+      Error: 'var(--ds-error)'
+    }
   },
-  fonts: {
-    display: '"Bebas Neue", sans-serif',
-    body: '"Inter", sans-serif',
-    raw: '"Comic Neue", cursive',
+  Type: {
+    Expressive: {
+      Display: {
+        fontFamily: '"Bebas Neue", sans-serif',
+        lineHeight: '1.1',
+        letterSpacing: '0.02em'
+      },
+      Quote: {
+        fontFamily: '"Comic Neue", cursive',
+        fontWeight: 400
+      }
+    },
+    Readable: {
+      Body: {
+        fontFamily: '"Inter", sans-serif',
+        lineHeight: '1.5'
+      },
+      Label: {
+        fontFamily: '"Inter", sans-serif',
+        fontWeight: 500,
+        letterSpacing: '0.01em'
+      }
+    }
   },
-  radius: {
-    sm: '8px',
-    md: '16px',
-    lg: '24px',
-    xl: '32px',
-    full: '9999px',
+  Spacing: {
+    Base: 4,
+    S: '8px',
+    M: '16px',
+    L: '24px',
+    XL: '32px',
+    XXL: '64px',
   },
-  shadow: {
-    soft: '0 4px 20px rgba(0,0,0,0.08)', 
-    glow: '0 0 20px rgba(255, 79, 31, 0.3)',
-    card: '0 2px 8px rgba(0,0,0,0.05)',
+  Radius: {
+    S: '8px',
+    M: '16px',
+    L: '24px',
+    Full: '9999px'
   },
-  layout: {
-    width: '100%',
-    maxWidth: '500px', 
+  Effect: {
+    Shadow: {
+      Soft: '0px 8px 32px rgba(0,0,0,0.08)',
+      Glass: '0 8px 32px 0 rgba(31, 38, 135, 0.07)',
+    },
+    Blur: {
+      Glass: 'blur(16px)',
+    }
   },
-  motion: {
-    spring: { type: 'spring', stiffness: 180, damping: 24, mass: 0.8 }, 
-    gentle: { type: 'spring', stiffness: 80, damping: 25, mass: 1.2 }, 
-    tactile: { type: 'spring', stiffness: 300, damping: 30 },
-    stagger: 0.08,
-    page: {
-      initial: { opacity: 0, filter: 'blur(4px)' },
-      animate: { opacity: 1, filter: 'blur(0px)' },
-      exit: { opacity: 0, filter: 'blur(4px)' },
-      transition: { duration: 0.4, ease: [0.25, 0.1, 0.25, 1] }
+  Motion: {
+    // 100ms Fluid Motion System
+    Spring: {
+      Gentle: { type: 'spring', stiffness: 120, damping: 20, mass: 1 },
+      Snappy: { type: 'spring', stiffness: 300, damping: 30, mass: 0.8 },
+      Bouncy: { type: 'spring', stiffness: 400, damping: 15, mass: 1.2 }
+    },
+    Duration: {
+      Fast: 0.1,
+      Normal: 0.3,
+      Slow: 0.6
     }
   }
 };
 
-export const commonStyles = {
-  glassPanel: {
-    background: theme.colors.glass,
-    backdropFilter: 'blur(20px)',
-    WebkitBackdropFilter: 'blur(20px)',
-    borderTop: `1px solid ${theme.colors.border}`,
+// Legacy/Bridge Theme object to support existing components
+export const theme = {
+  colors: {
+    surface1: DS.Color.Base.Surface[1],
+    surface2: DS.Color.Base.Surface[2],
+    surface3: DS.Color.Base.Surface[3],
+    text1: DS.Color.Base.Content[1],
+    text2: DS.Color.Base.Content[2],
+    text3: DS.Color.Base.Content[3],
+    accent: DS.Color.Accent.Surface,
+    danger: DS.Color.Status.Error,
+    border: DS.Color.Base.Border,
+    inputBg: DS.Color.Base.Surface[2],
   },
+  fonts: {
+    display: DS.Type.Expressive.Display.fontFamily,
+    body: DS.Type.Readable.Body.fontFamily,
+  },
+  layout: {
+    maxWidth: '600px',
+  },
+  motion: {
+    page: {
+      initial: { opacity: 0 },
+      animate: { opacity: 1 },
+      exit: { opacity: 0 },
+      transition: { duration: 0.3 }
+    },
+    gentle: DS.Motion.Spring.Gentle,
+  },
+  radius: {
+    md: DS.Radius.M,
+    lg: DS.Radius.L,
+    xl: DS.Radius.L,
+    full: DS.Radius.Full,
+  },
+  shadow: {
+    soft: DS.Effect.Shadow.Soft,
+    card: '0 2px 8px rgba(0,0,0,0.1)',
+  }
+};
+
+export const commonStyles = {
   flexCenter: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  flexBetween: {
+  pageContainer: {
+    minHeight: '100vh',
+    width: '100%',
+    background: DS.Color.Base.Surface[1],
+    color: DS.Color.Base.Content[1],
     display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'center',
   },
   inputReset: {
-    background: 'transparent',
     border: 'none',
     outline: 'none',
+    background: 'transparent',
     width: '100%',
-    color: theme.colors.text1,
-    fontFamily: theme.fonts.body,
-  },
-  pageContainer: {
-    minHeight: '100dvh', /* Dynamic viewport height for mobile */
-    background: theme.colors.surface1, 
-    display: 'flex', 
-    justifyContent: 'center',
-    width: '100%',
-    transition: 'background-color 0.6s cubic-bezier(0.22, 1, 0.36, 1), color 0.6s cubic-bezier(0.22, 1, 0.36, 1)'
+    fontFamily: 'inherit',
+    color: 'inherit',
   }
 };

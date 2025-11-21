@@ -46,29 +46,23 @@ export const MessagesList: React.FC = () => {
   };
 
   return (
-    <motion.div 
+    // Removed motion page props to keep header static
+    <div 
       style={commonStyles.pageContainer}
-      {...theme.motion.page}
     >
       <div style={{ width: '100%', maxWidth: theme.layout.maxWidth, paddingTop: '40px', paddingLeft: '24px', paddingRight: '24px', paddingBottom: '180px' }}>
         
-        {/* Header */}
+        {/* Header - Static */}
         <div style={{ marginBottom: '40px' }}>
-          <motion.h1 
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2, ...theme.motion.gentle }}
+          <h1 
             style={{ fontSize: '32px', color: theme.colors.text1, marginBottom: '4px' }}
           >
             Talks<span style={{ color: theme.colors.accent }}>.</span>
-          </motion.h1>
+          </h1>
         </div>
 
-        {/* Glassy Search Pill */}
-        <motion.div 
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.3 }}
+        {/* Glassy Search Pill - Static */}
+        <div 
           style={{ position: 'relative', marginBottom: '48px' }}
         >
           <div style={{
@@ -101,9 +95,9 @@ export const MessagesList: React.FC = () => {
                 }}
               />
           </div>
-        </motion.div>
+        </div>
 
-        {/* Minimal List */}
+        {/* Minimal List - Animates In */}
         <motion.div 
           variants={listVariants}
           initial="hidden"
@@ -147,6 +141,6 @@ export const MessagesList: React.FC = () => {
           )}
         </motion.div>
       </div>
-    </motion.div>
+    </div>
   );
 };

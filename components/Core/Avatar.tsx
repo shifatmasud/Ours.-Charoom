@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React, { useState } from 'react';
 import { DS } from '../../Theme';
 
 interface AvatarProps {
@@ -11,6 +11,9 @@ interface AvatarProps {
 }
 
 export const Avatar: React.FC<AvatarProps> = ({ src, alt, size = 'md', bordered = false, style }) => {
+  const [imgSrc, setImgSrc] = useState(src);
+  const [hasError, setHasError] = useState(false);
+
   const sizeMap = {
     sm: '32px',
     md: '48px',
@@ -27,6 +30,9 @@ export const Avatar: React.FC<AvatarProps> = ({ src, alt, size = 'md', bordered 
     flexShrink: 0,
     padding: bordered ? '3px' : '0',
     background: bordered ? `linear-gradient(135deg, ${DS.Color.Accent.Surface}, #FF0000)` : undefined,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
     ...style,
   };
 
@@ -36,12 +42,32 @@ export const Avatar: React.FC<AvatarProps> = ({ src, alt, size = 'md', bordered 
     objectFit: 'cover',
     borderRadius: DS.Radius.Full,
     border: bordered ? `2px solid ${DS.Color.Base.Surface[1]}` : 'none',
-    display: 'block',
+    display: hasError ? 'none' : 'block',
+  };
+
+  const handleError = () => {
+    if (!hasError) {
+       setHasError(true);
+       // Fallback to a generative colored placeholder
+    }
   };
 
   return (
     <div style={wrapperStyle}>
-      <img src={src} alt={alt} style={imgStyle} />
+      {!hasError ? (
+        <img 
+          src={imgSrc} 
+          alt={alt} 
+          style={imgStyle} 
+          onError={handleError}
+          crossOrigin="anonymous"
+          loading="lazy"
+        />
+      ) : (
+        <div style={{ width: '100%', height: '100%', background: DS.Color.Base.Surface[2], display: 'flex', alignItems: 'center', justifyContent: 'center', color: DS.Color.Base.Content[2], fontSize: size === 'sm' ? '10px' : '14px', fontWeight: 600 }}>
+            {alt.charAt(0).toUpperCase()}
+        </div>
+      )}
     </div>
   );
 };

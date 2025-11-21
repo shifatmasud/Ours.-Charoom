@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom';
 import { api } from '../../services/supabaseClient';
 import { CurrentUser, Post, Profile as UserProfile } from '../../types';
 import { Avatar } from '../Core/Avatar';
-import { SquaresFour, ChatCircleText, CaretLeft, X } from '@phosphor-icons/react';
+import { SquaresFour, ChatCircleText, CaretLeft, X, SignOut } from '@phosphor-icons/react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { theme, commonStyles } from '../../Theme';
 import { SlotCounter } from '../Core/SlotCounter';
@@ -165,23 +165,48 @@ export const Profile: React.FC = () => {
                   </div>
                   
                   {isMyProfile ? (
-                    <button 
-                      onClick={() => setIsEditing(true)}
-                      style={{ 
-                        width: '100%', 
-                        background: theme.colors.surface2, 
-                        border: `1px solid ${theme.colors.border}`, // Used border variable for better contrast
-                        color: theme.colors.text1, 
-                        padding: '12px', 
-                        borderRadius: theme.radius.full, 
-                        fontWeight: 600, 
-                        fontSize: '14px', 
-                        cursor: 'pointer', 
-                        transition: 'all 0.2s' 
-                      }}
-                    >
-                      Edit Profile
-                    </button>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                      <button 
+                        onClick={() => setIsEditing(true)}
+                        style={{ 
+                          width: '100%', 
+                          background: theme.colors.surface2, 
+                          border: `1px solid ${theme.colors.border}`, // Used border variable for better contrast
+                          color: theme.colors.text1, 
+                          padding: '12px', 
+                          borderRadius: theme.radius.full, 
+                          fontWeight: 600, 
+                          fontSize: '14px', 
+                          cursor: 'pointer', 
+                          transition: 'all 0.2s' 
+                        }}
+                      >
+                        Edit Profile
+                      </button>
+                      
+                      <button 
+                        onClick={() => api.signOut()}
+                        style={{ 
+                          width: '100%', 
+                          background: 'transparent', 
+                          border: `1px solid ${theme.colors.danger}`, 
+                          color: theme.colors.danger, 
+                          padding: '12px', 
+                          borderRadius: theme.radius.full, 
+                          fontWeight: 600, 
+                          fontSize: '14px', 
+                          cursor: 'pointer', 
+                          transition: 'all 0.2s',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '8px'
+                        }}
+                      >
+                        <SignOut size={18} weight="bold" />
+                        Sign Out
+                      </button>
+                    </div>
                   ) : (
                     <div style={{ display: 'flex', gap: '16px', justifyContent: 'center' }}>
                       <button 

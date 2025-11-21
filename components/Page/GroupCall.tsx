@@ -5,7 +5,6 @@ import { Microphone, MicrophoneSlash, PhoneDisconnect, Users } from '@phosphor-i
 import { motion, AnimatePresence } from 'framer-motion';
 import { theme, commonStyles } from '../../Theme';
 import { api, supabase } from '../../services/supabaseClient';
-import { Avatar } from '../Core/Avatar';
 import { CurrentUser } from '../../types';
 
 // --- types ---
@@ -267,7 +266,24 @@ export const GroupCall: React.FC = () => {
                    transition={{ duration: 1.5, repeat: Infinity }}
                    style={{ borderRadius: '50%' }}
                 >
-                    <Avatar src={currentUser?.avatar_url || ''} alt="me" size="xl" style={{ width: '100px', height: '100px' }} />
+                    {/* Replaced Avatar with Letter Fallback */}
+                    <div style={{ 
+                        width: '100px', 
+                        height: '100px', 
+                        borderRadius: '50%', 
+                        background: theme.colors.surface3, 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        justifyContent: 'center',
+                        border: `2px solid ${theme.colors.surface2}`,
+                        color: theme.colors.text1,
+                        fontSize: '36px',
+                        fontWeight: 700,
+                        fontFamily: theme.fonts.display,
+                        letterSpacing: '2px'
+                    }}>
+                        {currentUser?.username?.charAt(0).toUpperCase() || 'U'}
+                    </div>
                 </motion.div>
                 <span style={{ color: theme.colors.text1, fontSize: '14px', fontWeight: 500 }}>You</span>
             </div>

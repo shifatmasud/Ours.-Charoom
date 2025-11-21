@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Heart, ChatCircle, PaperPlaneTilt, PaperPlaneRight } from '@phosphor-icons/react';
+import { Heart, ChatCircle, PaperPlaneTilt, PaperPlaneRight, WarningCircle } from '@phosphor-icons/react';
 import { Avatar } from '../Core/Avatar';
 import { Button, ParticleBurst } from '../Core/Button';
 import { SlotCounter } from '../Core/SlotCounter';
@@ -26,6 +26,7 @@ export const PostCard: React.FC<PostCardProps> = ({ post, currentUser }) => {
   const [newComment, setNewComment] = useState('');
   const [loadingComments, setLoadingComments] = useState(false);
   const [showIconBurst, setShowIconBurst] = useState(false);
+  const [imageError, setImageError] = useState(false);
 
   const handleDoubleTap = () => {
     if (!isLiked) toggleLike();
@@ -85,17 +86,30 @@ export const PostCard: React.FC<PostCardProps> = ({ post, currentUser }) => {
           overflow: 'hidden',
           backgroundColor: DS.Color.Base.Surface[2],
           marginBottom: '16px',
-          cursor: 'pointer'
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center'
         }}
         onDoubleClick={handleDoubleTap}
         whileHover={{ scale: 1.005 }}
         transition={DS.Motion.Spring.Gentle}
       >
-        <img 
-          src={post.image_url} 
-          alt="Moment" 
-          style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
-        />
+        {!imageError ? (
+          <img 
+            src={post.image_url} 
+            alt="Moment" 
+            style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
+            onError={() => setImageError(true)}
+            crossOrigin="anonymous"
+            loading="lazy"
+          />
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', color: DS.Color.Base.Content[3] }}>
+             <WarningCircle size={32} />
+             <span style={{ fontSize: '12px' }}>Image failed to load</span>
+          </div>
+        )}
         
         <AnimatePresence>
           {showHeartOverlay && (

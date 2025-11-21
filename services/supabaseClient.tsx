@@ -328,7 +328,13 @@ export const api = {
 
   // --- Messaging ---
   getMessages: async (friendId: string): Promise<Message[]> => {
-    if (isGuestMode()) return MOCK_MESSAGES;
+    if (isGuestMode()) {
+        // Return messages exchanged between Guest and Friend
+        return MOCK_MESSAGES.filter(m => 
+            (m.sender_id === MOCK_USER.id && m.receiver_id === friendId) || 
+            (m.sender_id === friendId && m.receiver_id === MOCK_USER.id)
+        ).sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+    }
 
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return [];
@@ -344,7 +350,37 @@ export const api = {
   },
 
   sendMessage: async (senderId: string, receiverId: string, content: string): Promise<void> => {
-    if (isGuestMode()) return;
+    if (isGuestMode()) {
+        const newMessage: Message = {
+            id: `local_${Date.now()}`,
+            sender_id: senderId,
+            receiver_id: receiverId,
+            content: content,
+            created_at: new Date().toISOString()
+        };
+        MOCK_MESSAGES.push(newMessage);
+
+        // Simulate a reply to make it feel alive for guests
+        setTimeout(() => {
+            const replies = [
+                "That's interesting! Tell me more.",
+                "I'm just a simulation, but I'm listening.",
+                "Cool perspective!",
+                "Sending bytes from the void... 🌌",
+                "Can't wait to see real updates."
+            ];
+            const randomReply = replies[Math.floor(Math.random() * replies.length)];
+            
+            MOCK_MESSAGES.push({
+                id: `reply_${Date.now()}`,
+                sender_id: receiverId,
+                receiver_id: senderId,
+                content: randomReply,
+                created_at: new Date().toISOString()
+            });
+        }, 2000);
+        return;
+    }
     await supabase.from('messages').insert({ sender_id: senderId, receiver_id: receiverId, content });
   },
 

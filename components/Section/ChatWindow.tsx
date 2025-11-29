@@ -39,16 +39,23 @@ export const ChatWindow: React.FC = () => {
 
   useEffect(() => {
     let ignore = false;
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+
     const init = async () => {
       const user = await api.getCurrentUser();
-      if (!ignore) setCurrentUser(user);
+      if (ignore) return;
+      setCurrentUser(user);
+      
       if (friendId) {
         if (friendId === 'codex') {
              setFriendProfile({ username: 'CODEX', avatar_url: 'https://picsum.photos/seed/codex/100/100', id: 'codex' });
              const msgs = await api.getMessages('codex');
-             if (!ignore) setMessages(msgs);
+             if (ignore) return;
+             setMessages(msgs);
+             
              // Setup realtime subscription for codex
-             const channel = supabase.channel('codex_chat')
+             // Important: Assign the channel subscription to the local variable for cleanup
+             channel = supabase.channel('codex_chat_v2')
                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: 'receiver_id=eq.codex' }, payload => {
                   setMessages(prev => {
                       // Prevent duplicates
@@ -57,17 +64,25 @@ export const ChatWindow: React.FC = () => {
                   });
                })
                .subscribe();
-             return () => { supabase.removeChannel(channel); };
+               
         } else {
              const msgs = await api.getMessages(friendId);
-             if (!ignore) setMessages(msgs);
+             if (ignore) return;
+             setMessages(msgs);
              const friend = (await api.getAllProfiles()).find(p => p.id === friendId);
-             if (!ignore) setFriendProfile(friend);
+             if (ignore) return;
+             setFriendProfile(friend);
         }
       }
     };
     init();
-    return () => { ignore = true; };
+
+    return () => { 
+        ignore = true; 
+        if (channel) {
+            supabase.removeChannel(channel);
+        }
+    };
   }, [friendId]);
 
   const handleSend = async (content: string, type: 'text'|'image'|'audio' = 'text', mediaUrl?: string) => {

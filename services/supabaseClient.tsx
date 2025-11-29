@@ -1,5 +1,4 @@
 
-
 import { createClient } from '@supabase/supabase-js';
 import { Post, Message, Notification, Profile, CurrentUser, Comment } from '../types';
 
@@ -8,6 +7,13 @@ const SUPABASE_URL = 'https://lezvekpflqbxornefbwh.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxlenZla3BmbHFieG9ybmVmYndoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM3MDM1OTEsImV4cCI6MjA3OTI3OTU5MX0._fN9MxAivt_GyYv81lR7VJUShAPnYQ5txynHxwyrftw';
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// --- Persistence Keys ---
+const KEYS = {
+  DELETED_POSTS: 'ours_deleted_posts_v1',
+  DELETED_COMMENTS: 'ours_deleted_comments_v1',
+  MOCK_MESSAGES: 'mock_messages_v2'
+};
 
 // --- Mock Data (Fallback & Guest Write Simulation) ---
 let MOCK_USER: CurrentUser = {
@@ -47,7 +53,7 @@ const MOCK_COMMENTS: Comment[] = [];
 // Persistence for Messages
 const loadMockMessages = (): Message[] => {
     try {
-        const stored = localStorage.getItem('mock_messages_v2');
+        const stored = localStorage.getItem(KEYS.MOCK_MESSAGES);
         return stored ? JSON.parse(stored) : [];
     } catch {
         return [];
@@ -58,16 +64,27 @@ let MOCK_MESSAGES: Message[] = loadMockMessages();
 
 const saveMockMessages = () => {
     try {
-        localStorage.setItem('mock_messages_v2', JSON.stringify(MOCK_MESSAGES));
+        localStorage.setItem(KEYS.MOCK_MESSAGES, JSON.stringify(MOCK_MESSAGES));
     } catch (e) {
         console.warn("Failed to save messages", e);
     }
 };
 
+// Persistence for Deletions
+const loadSet = (key: string): Set<string> => {
+    try {
+        return new Set(JSON.parse(localStorage.getItem(key) || '[]'));
+    } catch { return new Set(); }
+};
+
+const saveSet = (key: string, set: Set<string>) => {
+    localStorage.setItem(key, JSON.stringify(Array.from(set)));
+};
+
 const MOCK_FOLLOWS = new Set<string>(); 
 // Tracking deleted items for Guest/Admin session
-const DELETED_POST_IDS = new Set<string>();
-const DELETED_COMMENT_IDS = new Set<string>();
+const DELETED_POST_IDS = loadSet(KEYS.DELETED_POSTS);
+const DELETED_COMMENT_IDS = loadSet(KEYS.DELETED_COMMENTS);
 
 // Helper: Check if we are in Guest Mode
 const isGuestMode = () => localStorage.getItem('mock_auth') === 'true';
@@ -96,9 +113,13 @@ export const api = {
     if (id === 'root' && pass === 'root') {
        await new Promise(r => setTimeout(r, 800)); // Simulate network delay
        localStorage.setItem('mock_auth', 'true');
-       // Clear deletions on new login
+       
+       // Clear deletions on fresh login for root
        DELETED_POST_IDS.clear();
        DELETED_COMMENT_IDS.clear();
+       saveSet(KEYS.DELETED_POSTS, DELETED_POST_IDS);
+       saveSet(KEYS.DELETED_COMMENTS, DELETED_COMMENT_IDS);
+       
        return MOCK_USER;
     }
     
@@ -431,6 +452,7 @@ export const api = {
     if (isGuestMode()) {
         MOCK_POSTS = MOCK_POSTS.filter(p => p.id !== postId);
         DELETED_POST_IDS.add(postId); // Track locally for session
+        saveSet(KEYS.DELETED_POSTS, DELETED_POST_IDS);
         return;
     }
     const { error } = await supabase.from('posts').delete().eq('id', postId);
@@ -506,6 +528,7 @@ export const api = {
         const index = MOCK_COMMENTS.findIndex(c => c.id === commentId);
         if (index > -1) MOCK_COMMENTS.splice(index, 1);
         DELETED_COMMENT_IDS.add(commentId);
+        saveSet(KEYS.DELETED_COMMENTS, DELETED_COMMENT_IDS);
         return;
     }
     const { error } = await supabase.from('comments').delete().eq('id', commentId);

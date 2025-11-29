@@ -1,8 +1,8 @@
 
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Microphone, MicrophoneSlash, PhoneDisconnect, Users } from '@phosphor-icons/react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { Microphone, MicrophoneSlash, PhoneDisconnect, Users, VideoCamera, VideoCameraSlash, Screencast, DesktopTower } from '@phosphor-icons/react';
+import { motion } from 'framer-motion';
 import { theme, commonStyles } from '../../Theme';
 import { api, supabase } from '../../services/supabaseClient';
 import { CurrentUser } from '../../types';
@@ -13,6 +13,7 @@ interface Peer {
   connection: RTCPeerConnection;
   stream?: MediaStream;
   username?: string;
+  isVideoEnabled?: boolean;
 }
 
 const ICE_SERVERS = {
@@ -29,6 +30,8 @@ export const GroupCall: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [peers, setPeers] = useState<Record<string, Peer>>({});
   const [isMuted, setIsMuted] = useState(false);
+  const [isVideoEnabled, setIsVideoEnabled] = useState(false);
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [status, setStatus] = useState('Initializing void...');
 
   // Refs for stability in callbacks
@@ -36,22 +39,14 @@ export const GroupCall: React.FC = () => {
   const peersRef = useRef<Record<string, Peer>>({});
   const userRef = useRef<CurrentUser | null>(null);
   const channelRef = useRef<any>(null);
-
-  // --- Audio Visualizer Helper ---
-  // Simple random pulse for now to simulate activity, 
-  // generic AudioContext analysis is heavy for code size in this constraint
-  const [pulse, setPulse] = useState(1);
-  useEffect(() => {
-    const interval = setInterval(() => {
-       setPulse(Math.random() * 0.5 + 1);
-    }, 500);
-    return () => clearInterval(interval);
-  }, []);
+  const localVideoRef = useRef<HTMLVideoElement>(null);
 
   // --- Cleanup ---
   const leaveCall = () => {
     // Stop tracks
-    localStreamRef.current?.getTracks().forEach(t => t.stop());
+    if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(t => t.stop());
+    }
     
     // Close connections
     Object.values(peersRef.current).forEach((p: Peer) => p.connection.close());
@@ -69,8 +64,8 @@ export const GroupCall: React.FC = () => {
         setCurrentUser(user);
         userRef.current = user;
 
-        // 1. Get Audio
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        // 1. Get Audio (Initial)
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
         localStreamRef.current = stream;
         setStatus('Listening for signals...');
 
@@ -103,19 +98,23 @@ export const GroupCall: React.FC = () => {
             
             if (type === 'offer') {
                 const peer = createPeer(from, false);
-                await peer.connection.setRemoteDescription(new RTCSessionDescription(data));
-                const answer = await peer.connection.createAnswer();
-                await peer.connection.setLocalDescription(answer);
-                
-                channel.send({
-                    type: 'broadcast',
-                    event: 'signal',
-                    payload: { to: from, from: user.id, type: 'answer', data: answer }
-                });
+                try {
+                    await peer.connection.setRemoteDescription(new RTCSessionDescription(data));
+                    const answer = await peer.connection.createAnswer();
+                    await peer.connection.setLocalDescription(answer);
+                    
+                    channel.send({
+                        type: 'broadcast',
+                        event: 'signal',
+                        payload: { to: from, from: user.id, type: 'answer', data: answer }
+                    });
+                } catch(e) { console.error("Offer error", e); }
             } else if (type === 'answer') {
                 const peer = peersRef.current[from];
                 if (peer) {
-                    await peer.connection.setRemoteDescription(new RTCSessionDescription(data));
+                    try {
+                        await peer.connection.setRemoteDescription(new RTCSessionDescription(data));
+                    } catch(e) { console.error("Answer error", e); }
                 }
             } else if (type === 'candidate') {
                 const peer = peersRef.current[from];
@@ -148,8 +147,7 @@ export const GroupCall: React.FC = () => {
     init();
 
     return () => {
-      // Cleanup handled by leaveCall usually, but here for safety
-      if (localStreamRef.current) localStreamRef.current.getTracks().forEach(t => t.stop());
+      // Cleanup handled by leaveCall logic if navigation happens, but extra safety:
       if (channelRef.current) supabase?.removeChannel(channelRef.current);
     };
   }, [roomId]);
@@ -162,24 +160,41 @@ export const GroupCall: React.FC = () => {
      const pc = new RTCPeerConnection(ICE_SERVERS);
      
      // Add local tracks
-     localStreamRef.current?.getTracks().forEach(track => {
-         pc.addTrack(track, localStreamRef.current!);
-     });
+     if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(track => {
+            pc.addTrack(track, localStreamRef.current!);
+        });
+     }
 
      // Handle remote tracks
      pc.ontrack = (event) => {
          const stream = event.streams[0];
+         // Check if video
+         const hasVideo = stream.getVideoTracks().length > 0;
+         
          setPeers(prev => ({
              ...prev,
-             [targetId]: { ...prev[targetId], stream }
+             [targetId]: { ...prev[targetId], stream, isVideoEnabled: hasVideo }
          }));
-         
-         // Auto-play audio
-         const audio = document.createElement('audio');
-         audio.srcObject = stream;
-         audio.autoplay = true;
-         // audio.controls = true; // Debug
-         document.body.appendChild(audio); // Append to DOM (hidden) to ensure playback
+     };
+
+     // Handle Renegotiation
+     pc.onnegotiationneeded = async () => {
+        try {
+            if (pc.signalingState !== 'stable') return;
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            channelRef.current?.send({
+                 type: 'broadcast',
+                 event: 'signal',
+                 payload: { 
+                     to: targetId, 
+                     from: userRef.current?.id, 
+                     type: 'offer', 
+                     data: offer 
+                 }
+             });
+        } catch(e) { console.error("Renegotiation failed", e); }
      };
 
      // ICE Candidates
@@ -229,7 +244,122 @@ export const GroupCall: React.FC = () => {
           localStreamRef.current.getAudioTracks().forEach(track => {
               track.enabled = !track.enabled;
           });
-          setIsMuted(!localStreamRef.current.getAudioTracks()[0].enabled);
+          setIsMuted(!isMuted);
+      }
+  };
+
+  const toggleVideo = async () => {
+      if (isVideoEnabled) {
+          // Stop video
+          localStreamRef.current?.getVideoTracks().forEach(t => {
+              t.stop();
+              localStreamRef.current?.removeTrack(t);
+          });
+          
+          // Remove from peers using removeTrack to trigger negotiation
+          Object.values(peersRef.current).forEach((peer: Peer) => {
+              const senders = peer.connection.getSenders();
+              const videoSender = senders.find(s => s.track?.kind === 'video');
+              if (videoSender) {
+                  peer.connection.removeTrack(videoSender);
+              }
+          });
+
+          if (localVideoRef.current) localVideoRef.current.srcObject = null;
+          setIsVideoEnabled(false);
+          setIsScreenSharing(false); // Implicitly stop screen share if disabling video
+      } else {
+          // Start Video
+          try {
+              const videoStream = await navigator.mediaDevices.getUserMedia({ video: true });
+              const videoTrack = videoStream.getVideoTracks()[0];
+              
+              if (localStreamRef.current) {
+                  localStreamRef.current.addTrack(videoTrack);
+                  
+                  // Add to all peers
+                  Object.values(peersRef.current).forEach((peer: Peer) => {
+                      peer.connection.addTrack(videoTrack, localStreamRef.current!);
+                  });
+                  
+                  if (localVideoRef.current) {
+                      localVideoRef.current.srcObject = new MediaStream([videoTrack]);
+                      localVideoRef.current.play();
+                  }
+                  setIsVideoEnabled(true);
+                  // Ensure screen sharing is off if we enable camera
+                  setIsScreenSharing(false);
+              }
+          } catch(e) { 
+              console.error("Failed to start video", e); 
+              alert("Could not access camera");
+          }
+      }
+  };
+
+  const toggleScreenShare = async () => {
+      if (isScreenSharing) {
+          // Stop screen share -> revert to Camera if enabled, or stop video
+          // Simplification: Toggle off screen share stops video track.
+          // If they want camera back, they click video button.
+          localStreamRef.current?.getVideoTracks().forEach(t => { t.stop(); localStreamRef.current?.removeTrack(t); });
+          Object.values(peersRef.current).forEach((peer: Peer) => {
+            const senders = peer.connection.getSenders();
+            const videoSender = senders.find(s => s.track?.kind === 'video');
+            if (videoSender) peer.connection.removeTrack(videoSender);
+          });
+          
+          setIsScreenSharing(false);
+          setIsVideoEnabled(false);
+          if (localVideoRef.current) localVideoRef.current.srcObject = null;
+
+      } else {
+          try {
+              const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+              const screenTrack = screenStream.getVideoTracks()[0];
+              
+              // Handle track end (user clicks Stop Sharing in browser UI)
+              screenTrack.onended = () => {
+                  setIsScreenSharing(false);
+                  setIsVideoEnabled(false);
+                  if (localVideoRef.current) localVideoRef.current.srcObject = null;
+                  localStreamRef.current?.removeTrack(screenTrack);
+                   Object.values(peersRef.current).forEach((peer: Peer) => {
+                    const senders = peer.connection.getSenders();
+                    const videoSender = senders.find(s => s.track?.kind === 'video');
+                    if (videoSender) peer.connection.removeTrack(videoSender);
+                  });
+              };
+
+              // If there was already a video track, stop it and replace
+              const existingVideoTrack = localStreamRef.current?.getVideoTracks()[0];
+              if (existingVideoTrack) {
+                  existingVideoTrack.stop();
+                  localStreamRef.current?.removeTrack(existingVideoTrack);
+              }
+
+              localStreamRef.current?.addTrack(screenTrack);
+              
+              // Update Peers
+              Object.values(peersRef.current).forEach((peer: Peer) => {
+                  const senders = peer.connection.getSenders();
+                  const videoSender = senders.find(s => s.track?.kind === 'video');
+                  if (videoSender) {
+                      videoSender.replaceTrack(screenTrack);
+                  } else {
+                      peer.connection.addTrack(screenTrack, localStreamRef.current!);
+                  }
+              });
+
+              if (localVideoRef.current) {
+                  localVideoRef.current.srcObject = new MediaStream([screenTrack]);
+                  localVideoRef.current.play();
+              }
+              
+              setIsScreenSharing(true);
+              setIsVideoEnabled(true); // Screen share counts as video enabled for UI state generally
+
+          } catch (e) { console.error("Screen share failed", e); }
       }
   };
 
@@ -238,7 +368,7 @@ export const GroupCall: React.FC = () => {
       {...theme.motion.page}
       style={{ 
         ...commonStyles.pageContainer, 
-        background: '#000', // Deep void
+        background: '#000', 
         position: 'fixed', inset: 0, zIndex: 2000,
         flexDirection: 'column',
         justifyContent: 'space-between',
@@ -248,93 +378,48 @@ export const GroupCall: React.FC = () => {
         {/* Header */}
         <div style={{ padding: '32px', textAlign: 'center', zIndex: 10 }}>
             <h2 style={{ color: theme.colors.text2, fontSize: '14px', letterSpacing: '2px', textTransform: 'uppercase' }}>
-                Encrypted Channel
+                Codex Channel
             </h2>
             <p style={{ color: theme.colors.text3, fontSize: '12px', marginTop: '8px' }}>{status}</p>
         </div>
 
         {/* Participants Grid */}
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '24px', flexWrap: 'wrap', padding: '24px' }}>
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '24px', flexWrap: 'wrap', padding: '24px', overflowY: 'auto' }}>
             
             {/* Me */}
-            <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}>
-                <motion.div 
-                   animate={{ 
-                     boxShadow: !isMuted ? `0 0 ${20 * pulse}px ${theme.colors.accent}` : 'none',
-                     scale: !isMuted ? [1, 1.05, 1] : 1
-                   }}
-                   transition={{ duration: 1.5, repeat: Infinity }}
-                   style={{ borderRadius: '50%' }}
-                >
-                    {/* Replaced Avatar with Letter Fallback */}
-                    <div style={{ 
-                        width: '100px', 
-                        height: '100px', 
-                        borderRadius: '50%', 
-                        background: theme.colors.surface3, 
-                        display: 'flex', 
-                        alignItems: 'center', 
-                        justifyContent: 'center',
-                        border: `2px solid ${theme.colors.surface2}`,
-                        color: theme.colors.text1,
-                        fontSize: '36px',
-                        fontWeight: 700,
-                        fontFamily: theme.fonts.display,
-                        letterSpacing: '2px'
-                    }}>
-                        {currentUser?.username?.charAt(0).toUpperCase() || 'U'}
-                    </div>
-                </motion.div>
+            <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+                <div style={{ 
+                    width: isVideoEnabled || isScreenSharing ? '240px' : '100px', 
+                    height: isVideoEnabled || isScreenSharing ? '180px' : '100px', 
+                    borderRadius: isVideoEnabled ? '16px' : '50%', 
+                    background: theme.colors.surface3, 
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    border: `2px solid ${theme.colors.surface2}`,
+                    overflow: 'hidden',
+                    transition: 'all 0.3s ease'
+                }}>
+                    <video ref={localVideoRef} muted style={{ width: '100%', height: '100%', objectFit: 'cover', display: isVideoEnabled || isScreenSharing ? 'block' : 'none' }} />
+                    {(!isVideoEnabled && !isScreenSharing) && (
+                         <div style={{ fontSize: '36px', fontWeight: 700, color: theme.colors.text1 }}>
+                             {currentUser?.username?.charAt(0).toUpperCase() || 'U'}
+                         </div>
+                    )}
+                </div>
                 <span style={{ color: theme.colors.text1, fontSize: '14px', fontWeight: 500 }}>You</span>
             </div>
 
             {/* Remote Peers */}
             {Object.values(peers).map((peer: Peer) => (
-                <motion.div 
-                   key={peer.id}
-                   initial={{ opacity: 0, scale: 0.5 }}
-                   animate={{ opacity: 1, scale: 1 }}
-                   style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px' }}
-                >
-                     <motion.div 
-                        animate={{ 
-                            boxShadow: `0 0 ${20 * (Math.random() * 0.5 + 0.5)}px rgba(255,255,255,0.3)`,
-                        }}
-                        transition={{ duration: 2, repeat: Infinity }}
-                        style={{ borderRadius: '50%' }}
-                     >
-                        {/* Using a generic avatar for peers since we didn't fetch their profiles in this specialized view to save bandwidth/complexity */}
-                        <div style={{ width: '100px', height: '100px', borderRadius: '50%', background: theme.colors.surface3, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-                            <Users size={48} color={theme.colors.text2} />
-                        </div>
-                     </motion.div>
-                     <span style={{ color: theme.colors.text1, fontSize: '14px', fontWeight: 500 }}>User {peer.id.slice(0, 4)}</span>
-                </motion.div>
+                <RemotePeer key={peer.id} peer={peer} />
             ))}
-
-            {Object.keys(peers).length === 0 && (
-                <div style={{ position: 'absolute', bottom: '180px', width: '100%', textAlign: 'center', color: theme.colors.text3, fontSize: '12px' }}>
-                    Waiting for others to join...
-                </div>
-            )}
         </div>
 
         {/* Controls */}
-        <div style={{ padding: '48px 24px', display: 'flex', justifyContent: 'center', gap: '40px', background: 'linear-gradient(to top, #000 0%, transparent 100%)' }}>
-            <motion.button
-               whileTap={{ scale: 0.9 }}
-               onClick={toggleMute}
-               style={{
-                   width: '64px', height: '64px', borderRadius: '50%',
-                   background: isMuted ? theme.colors.text1 : 'rgba(255,255,255,0.1)',
-                   color: isMuted ? '#000' : theme.colors.text1,
-                   border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                   backdropFilter: 'blur(10px)', cursor: 'pointer'
-               }}
-            >
-                {isMuted ? <MicrophoneSlash size={24} weight="fill" /> : <Microphone size={24} weight="fill" />}
-            </motion.button>
-
+        <div style={{ padding: '48px 24px', display: 'flex', justifyContent: 'center', gap: '24px', background: 'linear-gradient(to top, #000 0%, transparent 100%)' }}>
+            <ControlButton onClick={toggleMute} active={!isMuted} icon={isMuted ? MicrophoneSlash : Microphone} />
+            <ControlButton onClick={toggleVideo} active={isVideoEnabled && !isScreenSharing} icon={isVideoEnabled && !isScreenSharing ? VideoCamera : VideoCameraSlash} />
+            <ControlButton onClick={toggleScreenShare} active={isScreenSharing} icon={isScreenSharing ? Screencast : DesktopTower} />
+            
             <motion.button
                whileTap={{ scale: 0.9 }}
                onClick={leaveCall}
@@ -352,3 +437,66 @@ export const GroupCall: React.FC = () => {
     </motion.div>
   );
 };
+
+const RemotePeer: React.FC<{ peer: Peer }> = ({ peer }) => {
+    const videoRef = useRef<HTMLVideoElement>(null);
+    const [hasVideo, setHasVideo] = useState(false);
+
+    useEffect(() => {
+        if (peer.stream && videoRef.current) {
+            videoRef.current.srcObject = peer.stream;
+            videoRef.current.play().catch(e => console.error("Play error", e));
+            
+            // Check tracks
+            const checkVideo = () => {
+               setHasVideo(peer.stream?.getVideoTracks().some(t => t.readyState === 'live' && t.enabled) || false);
+            };
+            checkVideo();
+            peer.stream.addEventListener('addtrack', checkVideo);
+            peer.stream.addEventListener('removetrack', checkVideo);
+            return () => {
+                 peer.stream?.removeEventListener('addtrack', checkVideo);
+                 peer.stream?.removeEventListener('removetrack', checkVideo);
+            };
+        }
+    }, [peer.stream]);
+
+    return (
+        <motion.div 
+           initial={{ opacity: 0, scale: 0.5 }}
+           animate={{ opacity: 1, scale: 1 }}
+           style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}
+        >
+             <div style={{ 
+                width: hasVideo ? '240px' : '100px', 
+                height: hasVideo ? '180px' : '100px', 
+                borderRadius: hasVideo ? '16px' : '50%', 
+                background: theme.colors.surface3, 
+                display: 'flex', alignItems: 'center', justifyContent: 'center', 
+                overflow: 'hidden',
+                border: `2px solid ${theme.colors.border}`,
+                transition: 'all 0.3s ease'
+             }}>
+                 <video ref={videoRef} style={{ width: '100%', height: '100%', objectFit: 'cover', display: hasVideo ? 'block' : 'none' }} autoPlay playsInline />
+                 {!hasVideo && <Users size={32} color={theme.colors.text2} />}
+             </div>
+             <span style={{ color: theme.colors.text1, fontSize: '14px', fontWeight: 500 }}>User {peer.id.slice(0, 4)}</span>
+        </motion.div>
+    );
+};
+
+const ControlButton = ({ onClick, active, icon: Icon }: any) => (
+    <motion.button
+        whileTap={{ scale: 0.9 }}
+        onClick={onClick}
+        style={{
+            width: '64px', height: '64px', borderRadius: '50%',
+            background: active ? theme.colors.text1 : 'rgba(255,255,255,0.1)',
+            color: active ? '#000' : theme.colors.text1,
+            border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            backdropFilter: 'blur(10px)', cursor: 'pointer'
+        }}
+    >
+        <Icon size={24} weight="fill" />
+    </motion.button>
+);

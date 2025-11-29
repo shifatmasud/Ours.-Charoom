@@ -1,7 +1,8 @@
 
+
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Heart, ChatCircle, PaperPlaneTilt, PaperPlaneRight, WarningCircle, Check } from '@phosphor-icons/react';
+import { Heart, ChatCircle, PaperPlaneTilt, PaperPlaneRight, WarningCircle, Check, Trash } from '@phosphor-icons/react';
 import { Avatar } from '../Core/Avatar';
 import { Button, ParticleBurst } from '../Core/Button';
 import { SlotCounter } from '../Core/SlotCounter';
@@ -28,6 +29,9 @@ export const PostCard: React.FC<PostCardProps> = ({ post, currentUser }) => {
   const [showIconBurst, setShowIconBurst] = useState(false);
   const [imageError, setImageError] = useState(false);
   const [isShared, setIsShared] = useState(false);
+  const [isDeleted, setIsDeleted] = useState(false);
+
+  const canDelete = currentUser?.is_admin || currentUser?.id === post.user_id;
 
   const handleDoubleTap = () => {
     if (!isLiked) toggleLike();
@@ -94,6 +98,28 @@ export const PostCard: React.FC<PostCardProps> = ({ post, currentUser }) => {
       console.error('Error sharing:', err);
     }
   };
+
+  const handleDeletePost = async () => {
+    if (!window.confirm("Delete this post?")) return;
+    try {
+        await api.deletePost(post.id);
+        setIsDeleted(true);
+    } catch (e) {
+        console.error("Failed to delete post", e);
+    }
+  };
+
+  const handleDeleteComment = async (commentId: string) => {
+    if (!window.confirm("Delete this comment?")) return;
+    try {
+        await api.deleteComment(commentId);
+        setComments(prev => prev.filter(c => c.id !== commentId));
+    } catch (e) {
+        console.error("Failed to delete comment", e);
+    }
+  };
+
+  if (isDeleted) return null;
 
   return (
     <motion.article 
@@ -200,13 +226,20 @@ export const PostCard: React.FC<PostCardProps> = ({ post, currentUser }) => {
              </Button>
            </div>
            
-           <Button variant="ghost" size="icon" onClick={handleShare}>
-              {isShared ? (
-                <Check size={22} weight="bold" color={DS.Color.Accent.Surface} />
-              ) : (
-                <PaperPlaneTilt size={22} />
-              )}
-           </Button>
+           <div style={{ display: 'flex', gap: '8px' }}>
+                <Button variant="ghost" size="icon" onClick={handleShare}>
+                    {isShared ? (
+                        <Check size={22} weight="bold" color={DS.Color.Accent.Surface} />
+                    ) : (
+                        <PaperPlaneTilt size={22} />
+                    )}
+                </Button>
+                {canDelete && (
+                     <Button variant="ghost" size="icon" onClick={handleDeletePost} style={{ color: DS.Color.Status.Error }}>
+                         <Trash size={20} />
+                     </Button>
+                )}
+           </div>
         </div>
 
         {/* Comments Expansion */}
@@ -223,9 +256,19 @@ export const PostCard: React.FC<PostCardProps> = ({ post, currentUser }) => {
                  <div style={{ fontSize: '12px', color: DS.Color.Base.Content[3] }}>Loading thoughts...</div>
                ) : comments.length > 0 ? (
                  comments.map((comment, i) => (
-                   <div key={comment.id} style={{ display: 'flex', gap: '8px', fontSize: '13px' }}>
-                     <span style={{ color: DS.Color.Base.Content[2], fontWeight: 600 }}>{comment.profile?.username}</span>
-                     <span style={{ color: DS.Color.Base.Content[2] }}>{comment.content}</span>
+                   <div key={comment.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <div style={{ display: 'flex', gap: '8px', fontSize: '13px' }}>
+                            <span style={{ color: DS.Color.Base.Content[2], fontWeight: 600 }}>{comment.profile?.username}</span>
+                            <span style={{ color: DS.Color.Base.Content[2] }}>{comment.content}</span>
+                        </div>
+                        {(currentUser?.is_admin || currentUser?.id === comment.user_id) && (
+                            <button 
+                                onClick={() => handleDeleteComment(comment.id)}
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', color: DS.Color.Base.Content[3], padding: '0 4px' }}
+                            >
+                                <Trash size={14} />
+                            </button>
+                        )}
                    </div>
                  ))
                ) : (

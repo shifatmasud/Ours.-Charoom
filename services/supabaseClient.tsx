@@ -1,4 +1,5 @@
 
+
 import { createClient } from '@supabase/supabase-js';
 import { Post, Message, Notification, Profile, CurrentUser, Comment } from '../types';
 
@@ -17,6 +18,7 @@ let MOCK_USER: CurrentUser = {
   bio: 'Just visiting the void.',
   followers_count: 0,
   following_count: 0,
+  is_admin: true
 };
 
 // Fallback data in case DB is empty or connection fails
@@ -41,8 +43,31 @@ let MOCK_POSTS: Post[] = [
 ];
 
 const MOCK_COMMENTS: Comment[] = [];
-const MOCK_MESSAGES: Message[] = [];
+
+// Persistence for Messages
+const loadMockMessages = (): Message[] => {
+    try {
+        const stored = localStorage.getItem('mock_messages_v2');
+        return stored ? JSON.parse(stored) : [];
+    } catch {
+        return [];
+    }
+};
+
+let MOCK_MESSAGES: Message[] = loadMockMessages();
+
+const saveMockMessages = () => {
+    try {
+        localStorage.setItem('mock_messages_v2', JSON.stringify(MOCK_MESSAGES));
+    } catch (e) {
+        console.warn("Failed to save messages", e);
+    }
+};
+
 const MOCK_FOLLOWS = new Set<string>(); 
+// Tracking deleted items for Guest/Admin session
+const DELETED_POST_IDS = new Set<string>();
+const DELETED_COMMENT_IDS = new Set<string>();
 
 // Helper: Check if we are in Guest Mode
 const isGuestMode = () => localStorage.getItem('mock_auth') === 'true';
@@ -71,6 +96,9 @@ export const api = {
     if (id === 'root' && pass === 'root') {
        await new Promise(r => setTimeout(r, 800)); // Simulate network delay
        localStorage.setItem('mock_auth', 'true');
+       // Clear deletions on new login
+       DELETED_POST_IDS.clear();
+       DELETED_COMMENT_IDS.clear();
        return MOCK_USER;
     }
     
@@ -86,6 +114,18 @@ export const api = {
       username: data.user.email?.split('@')[0] || 'new_user',
       avatar_url: 'https://picsum.photos/100/100'
     };
+  },
+
+  resetPassword: async (email: string): Promise<void> => {
+    if (isGuestMode()) {
+       await new Promise(r => setTimeout(r, 1000));
+       return;
+    }
+    
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: window.location.origin + '/#/login',
+    });
+    if (error) throw error;
   },
 
   signOut: async (): Promise<void> => {
@@ -128,6 +168,14 @@ export const api = {
 
   // --- Profiles ---
   getUserProfile: async (userId: string): Promise<Profile> => {
+    if (userId === 'codex') {
+        return {
+            id: 'codex',
+            username: 'Codex',
+            avatar_url: 'https://picsum.photos/seed/codex/100/100', // Placeholder
+            bio: 'The Global Void.'
+        };
+    }
     if (userId === MOCK_USER.id) return MOCK_USER;
 
     // Always try DB first (even for guest) so we can see seeded users
@@ -239,10 +287,21 @@ export const api = {
       }));
     }
 
-    // If Guest, prepend any local mock posts created in this session
+    // If Guest, we need to merge MOCK_POSTS and realPosts, then filter deleted
     if (isGuestMode()) {
-        const sessionMockPosts = MOCK_POSTS.filter(p => p.id.startsWith('mock_') || p.id.startsWith('temp_'));
-        return [...sessionMockPosts, ...realPosts];
+        const allPosts = [...realPosts, ...MOCK_POSTS]; // Prefer Real posts first
+        // Deduplicate
+        const seen = new Set();
+        const uniquePosts = allPosts.filter(p => {
+             if (seen.has(p.id)) return false;
+             seen.add(p.id);
+             return true;
+        });
+
+        // Filter out deleted posts (simulated for Guest Admin)
+        return uniquePosts
+            .filter(p => !DELETED_POST_IDS.has(p.id))
+            .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     }
     
     return realPosts.length > 0 ? realPosts : MOCK_POSTS;
@@ -251,8 +310,28 @@ export const api = {
   getPost: async (postId: string): Promise<Post | null> => {
     // Guest Mode Check
     if (isGuestMode()) {
-      const p = MOCK_POSTS.find(p => p.id === postId);
-      return p || null;
+      if (DELETED_POST_IDS.has(postId)) return null;
+
+      const mockP = MOCK_POSTS.find(p => p.id === postId);
+      if (mockP) return mockP;
+
+      // Fallback: Try to fetch real post for guest view
+      const { data, error } = await supabase
+        .from('posts')
+        .select('*, profiles:user_id(*), likes(count), comments(count)')
+        .eq('id', postId)
+        .single();
+        
+      if (data) {
+          return {
+             ...data,
+             profiles: data.profiles || { id: data.user_id, username: 'unknown', avatar_url: 'https://picsum.photos/100/100' },
+             has_liked: false,
+             likes_count: data.likes ? data.likes[0]?.count : 0,
+             comments_count: data.comments ? data.comments[0]?.count : 0
+          };
+      }
+      return null;
     }
 
     const { data, error } = await supabase
@@ -282,7 +361,7 @@ export const api = {
 
   getUserPosts: async (userId: string): Promise<Post[]> => {
     if (userId === MOCK_USER.id) {
-       return MOCK_POSTS.filter(p => p.user_id === MOCK_USER.id);
+       return MOCK_POSTS.filter(p => p.user_id === MOCK_USER.id && !DELETED_POST_IDS.has(p.id));
     }
 
     // Try DB with full relations and counts
@@ -309,17 +388,22 @@ export const api = {
             }
         }
 
-        return data.map((p: any) => ({
+        const mapped = data.map((p: any) => ({
              ...p,
              profiles: p.profiles || { id: p.user_id, username: 'unknown', avatar_url: 'https://picsum.photos/100/100' },
              has_liked: likedSet.has(p.id),
              likes_count: p.likes ? p.likes[0]?.count : 0,
              comments_count: p.comments ? p.comments[0]?.count : 0
         }));
+
+        if (isGuestMode()) {
+            return mapped.filter((p: any) => !DELETED_POST_IDS.has(p.id));
+        }
+        return mapped;
     }
     
     // Fallback
-    return MOCK_POSTS.filter(p => p.user_id === userId);
+    return MOCK_POSTS.filter(p => p.user_id === userId && !DELETED_POST_IDS.has(p.id));
   },
 
   createPost: async (imageUrl: string, caption: string, userId: string): Promise<void> => {
@@ -343,6 +427,16 @@ export const api = {
     if (error) throw error;
   },
 
+  deletePost: async (postId: string): Promise<void> => {
+    if (isGuestMode()) {
+        MOCK_POSTS = MOCK_POSTS.filter(p => p.id !== postId);
+        DELETED_POST_IDS.add(postId); // Track locally for session
+        return;
+    }
+    const { error } = await supabase.from('posts').delete().eq('id', postId);
+    if (error) throw error;
+  },
+
   likePost: async (postId: string, userId: string, ownerId: string): Promise<void> => {
     if (isGuestMode()) return; // Visual toggle handled by component state
 
@@ -358,6 +452,7 @@ export const api = {
 
   // --- Comments ---
   getComments: async (postId: string): Promise<Comment[]> => {
+    let comments: Comment[] = [];
     const { data } = await supabase
       .from('comments')
       .select('*, profile:user_id(*)')
@@ -365,12 +460,21 @@ export const api = {
       .order('created_at', { ascending: true });
       
     if (data) {
-        return data.map((c: any) => ({ 
+        comments = data.map((c: any) => ({ 
             ...c, 
             profile: c.profile || { id: c.user_id, username: 'unknown', avatar_url: 'https://picsum.photos/30/30' }
         }));
     }
-    return MOCK_COMMENTS.filter(c => c.post_id === postId);
+    
+    if (isGuestMode()) {
+        const local = MOCK_COMMENTS.filter(c => c.post_id === postId);
+        const all = [...comments, ...local];
+        // Filter deleted
+        return all.filter(c => !DELETED_COMMENT_IDS.has(c.id))
+                  .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+    }
+
+    return comments.length > 0 ? comments : MOCK_COMMENTS.filter(c => c.post_id === postId);
   },
 
   addComment: async (postId: string, userId: string, content: string): Promise<Comment> => {
@@ -397,6 +501,17 @@ export const api = {
     return { ...data, profile: data.profile };
   },
 
+  deleteComment: async (commentId: string): Promise<void> => {
+    if (isGuestMode()) {
+        const index = MOCK_COMMENTS.findIndex(c => c.id === commentId);
+        if (index > -1) MOCK_COMMENTS.splice(index, 1);
+        DELETED_COMMENT_IDS.add(commentId);
+        return;
+    }
+    const { error } = await supabase.from('comments').delete().eq('id', commentId);
+    if (error) throw error;
+  },
+
   // --- Interactions ---
   followUser: async (followerId: string, targetId: string): Promise<void> => {
     if (isGuestMode()) { MOCK_FOLLOWS.add(`${followerId}:${targetId}`); return; }
@@ -410,6 +525,24 @@ export const api = {
 
   // --- Messaging ---
   getMessages: async (friendId: string): Promise<Message[]> => {
+    if (friendId === 'codex') {
+        // Return global/group messages
+        // Prioritize persistent MOCK messages if they exist (for Guest or Hybrid)
+        if (isGuestMode()) return MOCK_MESSAGES.filter(m => m.receiver_id === 'codex');
+        
+        // Even for real users, we might want to check DB but fallback to mock if DB is empty to show something
+        const { data, error } = await supabase
+            .from('messages')
+            .select('*')
+            .eq('receiver_id', 'codex')
+            .order('created_at', { ascending: true });
+            
+        if (error || !data || data.length === 0) {
+             return MOCK_MESSAGES.filter(m => m.receiver_id === 'codex');
+        }
+        return data || [];
+    }
+
     if (isGuestMode()) {
         // Return messages exchanged between Guest and Friend
         return MOCK_MESSAGES.filter(m => 
@@ -432,6 +565,19 @@ export const api = {
   },
 
   getLastMessage: async (friendId: string): Promise<Message | null> => {
+    if (friendId === 'codex') {
+        // Last message from codex
+        const { data } = await supabase.from('messages').select('*').eq('receiver_id', 'codex').order('created_at', { ascending: false }).limit(1);
+        const dbMsg = data?.[0];
+        const mockMsg = MOCK_MESSAGES.filter(m => m.receiver_id === 'codex').pop();
+        
+        // Return whichever is newer
+        if (dbMsg && mockMsg) {
+             return new Date(dbMsg.created_at) > new Date(mockMsg.created_at) ? dbMsg : mockMsg;
+        }
+        return dbMsg || mockMsg || null;
+    }
+
     if (isGuestMode()) {
         const msgs = MOCK_MESSAGES.filter(m => 
             (m.sender_id === MOCK_USER.id && m.receiver_id === friendId) || 
@@ -443,9 +589,6 @@ export const api = {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return null;
 
-    // Supabase or filter doesn't support complex order/limit perfectly in one go without rpc usually, 
-    // but we can try basic ordering.
-    // Optimized: Fetch strictly the latest one.
     const { data } = await supabase
       .from('messages')
       .select('*')
@@ -456,39 +599,61 @@ export const api = {
     return data && data.length > 0 ? data[0] : null;
   },
 
-  sendMessage: async (senderId: string, receiverId: string, content: string): Promise<void> => {
-    if (isGuestMode()) {
-        const newMessage: Message = {
-            id: `local_${Date.now()}`,
-            sender_id: senderId,
-            receiver_id: receiverId,
-            content: content,
-            created_at: new Date().toISOString()
-        };
-        MOCK_MESSAGES.push(newMessage);
+  sendMessage: async (senderId: string, receiverId: string, content: string, type: 'text' | 'image' | 'audio' = 'text', mediaUrl?: string): Promise<void> => {
+    const newMessage: Message = {
+        id: `msg_${Date.now()}_${Math.random()}`,
+        sender_id: senderId,
+        receiver_id: receiverId,
+        content: content,
+        type: type,
+        media_url: mediaUrl,
+        created_at: new Date().toISOString()
+    };
 
-        // Simulate a reply to make it feel alive for guests
-        setTimeout(() => {
-            const replies = [
-                "That's interesting! Tell me more.",
-                "I'm just a simulation, but I'm listening.",
-                "Cool perspective!",
-                "Sending bytes from the void... 🌌",
-                "Can't wait to see real updates."
-            ];
-            const randomReply = replies[Math.floor(Math.random() * replies.length)];
-            
-            MOCK_MESSAGES.push({
-                id: `reply_${Date.now()}`,
-                sender_id: receiverId,
-                receiver_id: senderId,
-                content: randomReply,
-                created_at: new Date().toISOString()
-            });
-        }, 2000);
+    if (isGuestMode() || receiverId === 'codex') {
+        const mockMsg = { ...newMessage };
+        MOCK_MESSAGES.push(mockMsg);
+        saveMockMessages(); // Persist to storage
+
+        if (receiverId !== 'codex' && !isGuestMode()) {
+            // If not codex and real user, also save to DB
+        }
+        
+        if (receiverId !== 'codex' && isGuestMode()) {
+            // Auto reply for guest
+             setTimeout(() => {
+                const replies = [
+                    "That's interesting! Tell me more.",
+                    "I'm just a simulation, but I'm listening.",
+                    "Cool perspective!",
+                    "Sending bytes from the void... 🌌",
+                    "Can't wait to see real updates."
+                ];
+                const randomReply = replies[Math.floor(Math.random() * replies.length)];
+                
+                const replyMsg: Message = {
+                    id: `reply_${Date.now()}`,
+                    sender_id: receiverId,
+                    receiver_id: senderId,
+                    content: randomReply,
+                    created_at: new Date().toISOString(),
+                    type: 'text'
+                };
+                MOCK_MESSAGES.push(replyMsg);
+                saveMockMessages();
+            }, 2000);
+        }
+        
+        // Try saving to Supabase for Codex if possible (Real users)
+        if (receiverId === 'codex' && !isGuestMode()) {
+             // We also save to local mock just in case DB fails or isn't subscribed efficiently for immediate feedback
+             await supabase.from('messages').insert({ sender_id: senderId, receiver_id: receiverId, content, type, media_url: mediaUrl });
+        }
+        
         return;
     }
-    await supabase.from('messages').insert({ sender_id: senderId, receiver_id: receiverId, content });
+    
+    await supabase.from('messages').insert({ sender_id: senderId, receiver_id: receiverId, content, type, media_url: mediaUrl });
   },
 
   // --- Storage ---

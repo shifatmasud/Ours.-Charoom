@@ -1,12 +1,14 @@
 
+
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../../services/supabaseClient';
 import { Profile, Message } from '../../types';
-import { MagnifyingGlass } from '@phosphor-icons/react';
+import { MagnifyingGlass, GlobeHemisphereWest } from '@phosphor-icons/react';
 import { Avatar } from '../Core/Avatar';
 import { theme, commonStyles } from '../../Theme';
 import { motion } from 'framer-motion';
+import { DS } from '../../Theme';
 
 interface ProfileWithMeta extends Profile {
   lastMessage?: Message | null;
@@ -67,25 +69,18 @@ export const MessagesList: React.FC = () => {
   };
 
   return (
-    // Removed motion page props to keep header static
-    <div 
-      style={commonStyles.pageContainer}
-    >
+    <div style={commonStyles.pageContainer}>
       <div style={{ width: '100%', maxWidth: theme.layout.maxWidth, paddingTop: '40px', paddingLeft: '24px', paddingRight: '24px', paddingBottom: '180px' }}>
         
-        {/* Header - Static */}
+        {/* Header */}
         <div style={{ marginBottom: '40px' }}>
-          <h1 
-            style={{ fontSize: '32px', color: theme.colors.text1, marginBottom: '4px' }}
-          >
+          <h1 style={{ fontSize: '32px', color: theme.colors.text1, marginBottom: '4px' }}>
             Talks<span style={{ color: theme.colors.accent }}>.</span>
           </h1>
         </div>
 
-        {/* Glassy Search Pill - Static */}
-        <div 
-          style={{ position: 'relative', marginBottom: '48px' }}
-        >
+        {/* Search */}
+        <div style={{ position: 'relative', marginBottom: '32px' }}>
           <div style={{
               position: 'relative',
               background: theme.colors.inputBg,
@@ -118,7 +113,33 @@ export const MessagesList: React.FC = () => {
           </div>
         </div>
 
-        {/* Minimal List - Animates In */}
+        {/* Codex Group Entry */}
+        <motion.div variants={itemVariants} initial="hidden" animate="show">
+            <Link to="/messages/codex" style={{ textDecoration: 'none' }}>
+                <div style={{ 
+                    display: 'flex', alignItems: 'center', gap: '20px', 
+                    background: `linear-gradient(90deg, ${DS.Color.Base.Surface[2]}, ${DS.Color.Base.Surface[1]})`, 
+                    padding: '16px', borderRadius: DS.Radius.L, marginBottom: '24px',
+                    border: `1px solid ${DS.Color.Accent.Surface}40`
+                }}>
+                    <div style={{ 
+                        width: '48px', height: '48px', borderRadius: '50%', 
+                        background: DS.Color.Accent.Surface, 
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        color: 'white'
+                    }}>
+                        <GlobeHemisphereWest size={28} weight="duotone" />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                        <h4 style={{ fontWeight: 600, fontSize: '16px', color: theme.colors.text1, margin: 0 }}>CODEX</h4>
+                        <p style={{ fontSize: '13px', color: theme.colors.text2, margin: 0 }}>Global Group Chat</p>
+                    </div>
+                    <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#22c55e' }}></div>
+                </div>
+            </Link>
+        </motion.div>
+
+        {/* Messages List */}
         <motion.div 
           variants={listVariants}
           initial="hidden"
@@ -130,7 +151,6 @@ export const MessagesList: React.FC = () => {
           ) : (
             filteredProfiles.map(profile => {
               const hasMessage = !!profile.lastMessage;
-              // Check if I sent the last message to prefix with "You: "
               const isMe = profile.lastMessage?.sender_id && profile.lastMessage.sender_id !== profile.id;
               
               return (
@@ -174,12 +194,12 @@ export const MessagesList: React.FC = () => {
                         whiteSpace: 'nowrap', 
                         overflow: 'hidden', 
                         textOverflow: 'ellipsis',
-                        fontWeight: hasMessage && !isMe ? 500 : 400 // Slightly bolder if they sent it (simulating unread emphasis)
+                        fontWeight: hasMessage && !isMe ? 500 : 400 
                       }}>
                         {hasMessage ? (
                             <>
                                 {isMe && <span style={{ color: theme.colors.text3 }}>You: </span>}
-                                {profile.lastMessage?.content}
+                                {profile.lastMessage?.type === 'image' ? '📷 Image' : profile.lastMessage?.type === 'audio' ? '🎤 Voice Message' : profile.lastMessage?.content}
                             </>
                         ) : (
                             <span style={{ fontStyle: 'italic', fontSize: '13px' }}>Start a conversation</span>

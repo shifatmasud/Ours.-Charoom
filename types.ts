@@ -1,3 +1,5 @@
+
+
 export interface Profile {
   id: string;
   username: string;
@@ -7,6 +9,7 @@ export interface Profile {
   followers_count?: number;
   following_count?: number;
   is_following?: boolean; // Virtual field for UI context
+  is_admin?: boolean;
 }
 
 export interface CurrentUser extends Profile {}
@@ -39,6 +42,8 @@ export interface Message {
   receiver_id: string;
   content: string;
   created_at: string;
+  type?: 'text' | 'image' | 'audio';
+  media_url?: string;
 }
 
 export interface Notification {

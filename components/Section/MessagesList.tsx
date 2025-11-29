@@ -2,23 +2,44 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../../services/supabaseClient';
-import { Profile } from '../../types';
+import { Profile, Message } from '../../types';
 import { MagnifyingGlass } from '@phosphor-icons/react';
 import { Avatar } from '../Core/Avatar';
 import { theme, commonStyles } from '../../Theme';
 import { motion } from 'framer-motion';
 
+interface ProfileWithMeta extends Profile {
+  lastMessage?: Message | null;
+}
+
 export const MessagesList: React.FC = () => {
-  const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [profiles, setProfiles] = useState<ProfileWithMeta[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const loadUsers = async () => {
       try {
-        const data = await api.getAllProfiles();
         const currentUser = await api.getCurrentUser();
-        setProfiles(data.filter(p => p.id !== currentUser.id));
+        const data = await api.getAllProfiles();
+        const others = data.filter(p => p.id !== currentUser.id);
+
+        // Fetch last message for each user to sort and display preview
+        const profilesWithMessages = await Promise.all(
+          others.map(async (profile) => {
+            const lastMsg = await api.getLastMessage(profile.id);
+            return { ...profile, lastMessage: lastMsg };
+          })
+        );
+
+        // Sort: Latest active conversations first, then others
+        profilesWithMessages.sort((a, b) => {
+            const timeA = a.lastMessage ? new Date(a.lastMessage.created_at).getTime() : 0;
+            const timeB = b.lastMessage ? new Date(b.lastMessage.created_at).getTime() : 0;
+            return timeB - timeA;
+        });
+
+        setProfiles(profilesWithMessages);
       } catch (e) {
         console.error(e);
       } finally {
@@ -107,37 +128,68 @@ export const MessagesList: React.FC = () => {
           {loading ? (
             <div style={{ color: theme.colors.text3, fontSize: '13px', marginTop: '20px' }}>loading...</div>
           ) : (
-            filteredProfiles.map(profile => (
-              <Link 
-                key={profile.id} 
-                to={`/messages/${profile.id}`} 
-                style={{ textDecoration: 'none' }}
-              >
-                <motion.div 
-                  variants={itemVariants}
-                  style={{ 
-                    display: 'flex', alignItems: 'center', gap: '20px',
-                    opacity: 0.8,
-                    cursor: 'pointer'
-                  }}
-                  whileHover={{ opacity: 1, x: 5 }}
+            filteredProfiles.map(profile => {
+              const hasMessage = !!profile.lastMessage;
+              // Check if I sent the last message to prefix with "You: "
+              const isMe = profile.lastMessage?.sender_id && profile.lastMessage.sender_id !== profile.id;
+              
+              return (
+                <Link 
+                  key={profile.id} 
+                  to={`/messages/${profile.id}`} 
+                  style={{ textDecoration: 'none' }}
                 >
-                  <div style={{ position: 'relative' }}>
-                    <Avatar src={profile.avatar_url} alt={profile.username} size="md" style={{ borderRadius: '12px' }} />
-                    <div style={{ position: 'absolute', bottom: -2, right: -2, background: theme.colors.surface1, borderRadius: '50%', padding: '3px' }}>
-                       <div style={{ width: '6px', height: '6px', background: theme.colors.accent, borderRadius: '50%' }}></div>
+                  <motion.div 
+                    variants={itemVariants}
+                    style={{ 
+                      display: 'flex', alignItems: 'center', gap: '20px',
+                      opacity: hasMessage ? 1 : 0.6,
+                      cursor: 'pointer'
+                    }}
+                    whileHover={{ opacity: 1, x: 5 }}
+                  >
+                    <div style={{ position: 'relative' }}>
+                      <Avatar src={profile.avatar_url} alt={profile.username} size="md" style={{ borderRadius: '12px' }} />
+                      {hasMessage && (
+                        <div style={{ position: 'absolute', bottom: -2, right: -2, background: theme.colors.surface1, borderRadius: '50%', padding: '3px' }}>
+                           <div style={{ width: '6px', height: '6px', background: theme.colors.accent, borderRadius: '50%' }}></div>
+                        </div>
+                      )}
                     </div>
-                  </div>
-                  
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <h4 style={{ fontWeight: 500, fontSize: '16px', color: theme.colors.text1, margin: '0 0 4px 0' }}>{profile.username}</h4>
-                    <p style={{ fontSize: '14px', color: theme.colors.text3, margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {profile.bio || '...'}
-                    </p>
-                  </div>
-                </motion.div>
-              </Link>
-            ))
+                    
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                          <h4 style={{ fontWeight: 500, fontSize: '16px', color: theme.colors.text1, margin: '0 0 4px 0' }}>{profile.username}</h4>
+                          {hasMessage && (
+                              <span style={{ fontSize: '11px', color: theme.colors.text3 }}>
+                                  {new Date(profile.lastMessage!.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                          )}
+                      </div>
+                      
+                      <p style={{ 
+                        fontSize: '14px', 
+                        color: hasMessage ? theme.colors.text2 : theme.colors.text3, 
+                        margin: 0, 
+                        whiteSpace: 'nowrap', 
+                        overflow: 'hidden', 
+                        textOverflow: 'ellipsis',
+                        fontWeight: hasMessage && !isMe ? 500 : 400 // Slightly bolder if they sent it (simulating unread emphasis)
+                      }}>
+                        {hasMessage ? (
+                            <>
+                                {isMe && <span style={{ color: theme.colors.text3 }}>You: </span>}
+                                {profile.lastMessage?.content}
+                            </>
+                        ) : (
+                            <span style={{ fontStyle: 'italic', fontSize: '13px' }}>Start a conversation</span>
+                        )}
+                      </p>
+                    </div>
+                  </motion.div>
+                </Link>
+              );
+            })
           )}
         </motion.div>
       </div>

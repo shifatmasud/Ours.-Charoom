@@ -114,7 +114,16 @@ export const api = {
          full_name: user.user_metadata?.full_name || '',
        };
     }
-    return data;
+    
+    // Fetch counts for current user too
+    const { count: followers } = await supabase.from('follows').select('*', { count: 'exact', head: true }).eq('following_id', user.id);
+    const { count: following } = await supabase.from('follows').select('*', { count: 'exact', head: true }).eq('follower_id', user.id);
+
+    return { 
+      ...data, 
+      followers_count: followers || 0,
+      following_count: following || 0
+    };
   },
 
   // --- Profiles ---
@@ -125,6 +134,21 @@ export const api = {
     const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
     
     if (data) {
+      // Parallel fetch for counts to fix "0" bug
+      const [followersReq, followingReq] = await Promise.all([
+        supabase.from('follows').select('*', { count: 'exact', head: true }).eq('following_id', userId),
+        supabase.from('follows').select('*', { count: 'exact', head: true }).eq('follower_id', userId)
+      ]);
+
+      const followersCount = followersReq.count || 0;
+      const followingCount = followingReq.count || 0;
+
+      const profile = { 
+        ...data, 
+        followers_count: followersCount,
+        following_count: followingCount
+      };
+
       // Check follow status if logged in as real user
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
@@ -133,11 +157,11 @@ export const api = {
           .select('*', { count: 'exact', head: true })
           .eq('follower_id', user.id)
           .eq('following_id', userId);
-        return { ...data, is_following: (count || 0) > 0 };
+        return { ...profile, is_following: (count || 0) > 0 };
       } else if (isGuestMode()) {
-         return { ...data, is_following: MOCK_FOLLOWS.has(`${MOCK_USER.id}:${userId}`) };
+         return { ...profile, is_following: MOCK_FOLLOWS.has(`${MOCK_USER.id}:${userId}`) };
       }
-      return data;
+      return profile;
     }
 
     // Fallback for missing profiles to prevent crash
@@ -187,10 +211,10 @@ export const api = {
 
   // --- Feed & Posts ---
   getFeed: async (): Promise<Post[]> => {
-    // Try fetching from real DB first
+    // Try fetching from real DB first, including count of likes and comments
     const { data, error } = await supabase
       .from('posts')
-      .select('*, profiles:user_id(*)') // Relational select
+      .select('*, profiles:user_id(*), likes(count), comments(count)') // Relational select with count
       .order('created_at', { ascending: false });
 
     let realPosts: Post[] = [];
@@ -209,7 +233,9 @@ export const api = {
       realPosts = data.map((p: any) => ({ 
           ...p, 
           profiles: p.profiles || { id: p.user_id, username: 'unknown', avatar_url: 'https://picsum.photos/100/100' },
-          has_liked: likedSet.has(p.id) 
+          has_liked: likedSet.has(p.id),
+          likes_count: p.likes ? p.likes[0]?.count : 0, // Extract count from Supabase response
+          comments_count: p.comments ? p.comments[0]?.count : 0 // Extract count from Supabase response
       }));
     }
 
@@ -227,14 +253,38 @@ export const api = {
        return MOCK_POSTS.filter(p => p.user_id === MOCK_USER.id);
     }
 
-    // Try DB
+    // Try DB with full relations and counts
     const { data } = await supabase
       .from('posts')
-      .select('*')
+      .select('*, profiles:user_id(*), likes(count), comments(count)') // Include comments count
       .eq('user_id', userId)
       .order('created_at', { ascending: false });
       
-    if (data && data.length > 0) return data as Post[];
+    if (data && data.length > 0) {
+        // Fetch has_liked status for viewer
+        const { data: { user } } = await supabase.auth.getUser();
+        let likedSet = new Set<string>();
+        
+        if (user) {
+            const postIds = data.map((p: any) => p.id);
+            if (postIds.length > 0) {
+              const { data: likes } = await supabase
+                .from('likes')
+                .select('post_id')
+                .eq('user_id', user.id)
+                .in('post_id', postIds);
+              likes?.forEach(l => likedSet.add(l.post_id));
+            }
+        }
+
+        return data.map((p: any) => ({
+             ...p,
+             profiles: p.profiles || { id: p.user_id, username: 'unknown', avatar_url: 'https://picsum.photos/100/100' },
+             has_liked: likedSet.has(p.id),
+             likes_count: p.likes ? p.likes[0]?.count : 0,
+             comments_count: p.comments ? p.comments[0]?.count : 0
+        }));
+    }
     
     // Fallback
     return MOCK_POSTS.filter(p => p.user_id === userId);
@@ -347,6 +397,31 @@ export const api = {
 
     if (error) throw error;
     return data;
+  },
+
+  getLastMessage: async (friendId: string): Promise<Message | null> => {
+    if (isGuestMode()) {
+        const msgs = MOCK_MESSAGES.filter(m => 
+            (m.sender_id === MOCK_USER.id && m.receiver_id === friendId) || 
+            (m.sender_id === friendId && m.receiver_id === MOCK_USER.id)
+        );
+        return msgs.length > 0 ? msgs[msgs.length - 1] : null;
+    }
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return null;
+
+    // Supabase or filter doesn't support complex order/limit perfectly in one go without rpc usually, 
+    // but we can try basic ordering.
+    // Optimized: Fetch strictly the latest one.
+    const { data } = await supabase
+      .from('messages')
+      .select('*')
+      .or(`and(sender_id.eq.${user.id},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${user.id})`)
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    return data && data.length > 0 ? data[0] : null;
   },
 
   sendMessage: async (senderId: string, receiverId: string, content: string): Promise<void> => {

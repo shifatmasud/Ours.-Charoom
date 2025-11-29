@@ -42,7 +42,12 @@ export const PostCard: React.FC<PostCardProps> = ({ post, currentUser }) => {
     if (newLikedState) {
       setShowIconBurst(true);
       setTimeout(() => setShowIconBurst(false), 500);
-      await api.likePost(post.id, currentUser.id, post.user_id);
+    }
+
+    try {
+       await api.likePost(post.id, currentUser.id, post.user_id);
+    } catch (e) {
+       console.error("Failed to toggle like", e);
     }
   };
 

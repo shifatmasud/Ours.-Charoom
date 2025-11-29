@@ -241,6 +241,7 @@ export const Profile: React.FC = () => {
                   animate={{ opacity: 1, scale: 1 }}
                   transition={{ delay: i * 0.05 }}
                   key={post.id} 
+                  onClick={() => navigate(`/post/${post.id}`)}
                   style={{ position: 'relative', aspectRatio: '1/1', cursor: 'pointer', overflow: 'hidden', backgroundColor: theme.colors.surface2 }}
                >
                  <img 

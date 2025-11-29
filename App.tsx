@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { HashRouter as Router, Routes, Route, useLocation, Navigate } from 'react-router-dom';
 import { Feed } from './components/Section/Feed';
@@ -8,6 +9,7 @@ import { Profile } from './components/Page/Profile';
 import { Login } from './components/Page/Login';
 import { LiveCall } from './components/Page/LiveCall';
 import { GroupCall } from './components/Page/GroupCall';
+import { PostDetail } from './components/Page/PostDetail';
 import { theme } from './Theme';
 import { ThemeProvider } from './ThemeContext';
 import { AnimatePresence } from 'framer-motion';
@@ -44,6 +46,7 @@ const AnimatedRoutes = () => {
         {/* Protected Routes */}
         <Route path="/" element={<RequireAuth><Feed /></RequireAuth>} />
         <Route path="/profile/:userId" element={<RequireAuth><Profile /></RequireAuth>} />
+        <Route path="/post/:postId" element={<RequireAuth><PostDetail /></RequireAuth>} />
         <Route path="/messages" element={<RequireAuth><MessagesList /></RequireAuth>} />
         <Route path="/messages/:friendId" element={<RequireAuth><ChatWindow /></RequireAuth>} />
         <Route path="/live" element={<RequireAuth><LiveCall /></RequireAuth>} />

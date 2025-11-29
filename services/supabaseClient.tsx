@@ -248,6 +248,38 @@ export const api = {
     return realPosts.length > 0 ? realPosts : MOCK_POSTS;
   },
 
+  getPost: async (postId: string): Promise<Post | null> => {
+    // Guest Mode Check
+    if (isGuestMode()) {
+      const p = MOCK_POSTS.find(p => p.id === postId);
+      return p || null;
+    }
+
+    const { data, error } = await supabase
+      .from('posts')
+      .select('*, profiles:user_id(*), likes(count), comments(count)')
+      .eq('id', postId)
+      .single();
+
+    if (error || !data) return null;
+
+    // Check if liked by current user
+    const { data: { user } } = await supabase.auth.getUser();
+    let hasLiked = false;
+    if (user) {
+      const { count } = await supabase.from('likes').select('*', { count: 'exact', head: true }).eq('post_id', postId).eq('user_id', user.id);
+      hasLiked = (count || 0) > 0;
+    }
+
+    return {
+      ...data,
+      profiles: data.profiles || { id: data.user_id, username: 'unknown', avatar_url: 'https://picsum.photos/100/100' },
+      has_liked: hasLiked,
+      likes_count: data.likes ? data.likes[0]?.count : 0,
+      comments_count: data.comments ? data.comments[0]?.count : 0
+    };
+  },
+
   getUserPosts: async (userId: string): Promise<Post[]> => {
     if (userId === MOCK_USER.id) {
        return MOCK_POSTS.filter(p => p.user_id === MOCK_USER.id);

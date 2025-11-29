@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Heart, ChatCircle, PaperPlaneTilt, PaperPlaneRight, WarningCircle } from '@phosphor-icons/react';
+import { Heart, ChatCircle, PaperPlaneTilt, PaperPlaneRight, WarningCircle, Check } from '@phosphor-icons/react';
 import { Avatar } from '../Core/Avatar';
 import { Button, ParticleBurst } from '../Core/Button';
 import { SlotCounter } from '../Core/SlotCounter';
@@ -27,6 +27,7 @@ export const PostCard: React.FC<PostCardProps> = ({ post, currentUser }) => {
   const [loadingComments, setLoadingComments] = useState(false);
   const [showIconBurst, setShowIconBurst] = useState(false);
   const [imageError, setImageError] = useState(false);
+  const [isShared, setIsShared] = useState(false);
 
   const handleDoubleTap = () => {
     if (!isLiked) toggleLike();
@@ -70,6 +71,27 @@ export const PostCard: React.FC<PostCardProps> = ({ post, currentUser }) => {
       setComments(prev => [...prev, savedComment]);
     } catch (e) {
       console.error("Failed to comment", e);
+    }
+  };
+
+  const handleShare = async () => {
+    const url = `${window.location.origin}/#/post/${post.id}`;
+    const shareData = {
+      title: 'Ours.',
+      text: `Check out this moment from ${post.profiles?.username}`,
+      url: url,
+    };
+
+    try {
+      if (navigator.share) {
+        await navigator.share(shareData);
+      } else {
+        await navigator.clipboard.writeText(url);
+        setIsShared(true);
+        setTimeout(() => setIsShared(false), 2000);
+      }
+    } catch (err) {
+      console.error('Error sharing:', err);
     }
   };
 
@@ -178,8 +200,12 @@ export const PostCard: React.FC<PostCardProps> = ({ post, currentUser }) => {
              </Button>
            </div>
            
-           <Button variant="ghost" size="icon">
-              <PaperPlaneTilt size={22} />
+           <Button variant="ghost" size="icon" onClick={handleShare}>
+              {isShared ? (
+                <Check size={22} weight="bold" color={DS.Color.Accent.Surface} />
+              ) : (
+                <PaperPlaneTilt size={22} />
+              )}
            </Button>
         </div>
 

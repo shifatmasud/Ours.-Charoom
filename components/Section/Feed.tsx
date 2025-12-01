@@ -163,7 +163,7 @@ export const Feed: React.FC = () => {
                 )}
              </Button>
              <Button variant="ghost" size="icon" onClick={toggleTheme}>
-               {mode === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
+               {mode === 'dark' ? <Moon size={20} /> : <Sun size={20} />}
              </Button>
              <Link to={`/profile/${currentUser?.id}`}>
                 <Avatar src={currentUser?.avatar_url || ''} alt="me" size="sm" />

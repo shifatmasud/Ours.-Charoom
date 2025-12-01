@@ -1,4 +1,5 @@
 
+
 import { createClient } from '@supabase/supabase-js';
 import { Post, Message, Notification, Profile, CurrentUser, Comment } from '../types';
 
@@ -486,6 +487,7 @@ export const api = {
        if (userId !== ownerId) {
           await supabase.from('notifications').insert({
               user_id: ownerId,
+              sender_id: userId, // Added: Ensure sender is recorded
               type: 'like',
               reference_id: postId,
               is_read: false
@@ -547,6 +549,7 @@ export const api = {
     if (post && post.user_id !== userId) {
         await supabase.from('notifications').insert({
             user_id: post.user_id,
+            sender_id: userId, // Added
             type: 'comment',
             reference_id: postId,
             is_read: false
@@ -580,6 +583,7 @@ export const api = {
     await supabase.from('follows').insert({ follower_id: followerId, following_id: targetId });
     await supabase.from('notifications').insert({
         user_id: targetId,
+        sender_id: followerId, // Added
         type: 'follow',
         reference_id: followerId,
         is_read: false
@@ -715,30 +719,48 @@ export const api = {
 
     const { data } = await supabase
         .from('notifications')
-        .select(`
-            *,
-            sender_profile:profiles!notifications_sender_id_fkey(*)
-        `) // Assuming explicit foreign key setup in Supabase, or using sender_id join
+        .select('*')
         .eq('user_id', user.id)
         .order('created_at', { ascending: false })
         .limit(20);
 
-    if (data) {
-        // Map sender profile from query if available, otherwise fetch locally or use sender_id
-        // The query above assumes a relationship. If not strict, we map manually:
-        const notifications: Notification[] = [];
-        for (const n of data) {
-             let sender = n.sender_profile;
-             // If not joined, fetch manually (rare fallback)
-             if (!sender && n.sender_id) {
-                 const { data: p } = await supabase.from('profiles').select('*').eq('id', n.sender_id).single();
-                 sender = p;
-             }
-             notifications.push({
-                 ...n,
-                 sender_profile: sender || { id: 'unknown', username: 'Unknown', avatar_url: '' }
-             });
+    if (data && data.length > 0) {
+        // Collect sender IDs to fetch profiles in one go
+        const senderIds = Array.from(new Set(data.map((n: any) => n.sender_id || '').filter(Boolean)));
+        
+        let profilesMap: Record<string, Profile> = {};
+        if (senderIds.length > 0) {
+            const { data: profiles } = await supabase.from('profiles').select('*').in('id', senderIds);
+            if (profiles) {
+                profiles.forEach((p: Profile) => { profilesMap[p.id] = p; });
+            }
         }
+
+        // Fetch Post Images for "like" and "comment" notifications
+        // This ensures the thumbnails are real and not mock placeholders
+        const postIds = data
+            .filter((n: any) => (n.type === 'like' || n.type === 'comment') && n.reference_id)
+            .map((n: any) => n.reference_id);
+        
+        let postsMap: Record<string, { image_url: string }> = {};
+        if (postIds.length > 0) {
+             const { data: posts } = await supabase.from('posts').select('id, image_url').in('id', postIds);
+             if (posts) {
+                 posts.forEach((p: any) => { postsMap[p.id] = { image_url: p.image_url }; });
+             }
+        }
+
+        const notifications: Notification[] = data.map((n: any) => ({
+             ...n,
+             sender_id: n.sender_id || '',
+             sender_profile: profilesMap[n.sender_id] || { 
+                 id: n.sender_id || 'unknown', 
+                 username: 'Unknown User', 
+                 avatar_url: 'https://picsum.photos/100/100' 
+             },
+             media_url: postsMap[n.reference_id]?.image_url
+        }));
+        
         return notifications;
     }
     return [];

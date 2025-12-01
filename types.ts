@@ -49,9 +49,11 @@ export interface Message {
 export interface Notification {
   id: string;
   user_id: string;
+  sender_id: string;
   type: 'like' | 'comment' | 'follow';
   reference_id: string;
   is_read: boolean;
   created_at: string;
   sender_profile?: Profile; // Virtual/Joined
+  media_url?: string; // Virtual/Joined for post thumbnail
 }

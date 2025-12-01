@@ -197,7 +197,7 @@ export const Login: React.FC = () => {
                         value={password}
                         onChange={e => setPassword(e.target.value)}
                         style={{ background: 'rgba(255,255,255,0.05)', marginBottom: '8px' }}
-                        required={view !== 'reset'}
+                        required
                     />
                     
                     {view === 'login' && (

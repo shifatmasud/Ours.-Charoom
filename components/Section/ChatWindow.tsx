@@ -7,6 +7,7 @@ import { Message, CurrentUser } from '../../types';
 import { motion, AnimatePresence } from 'framer-motion';
 import { theme, commonStyles, DS } from '../../Theme';
 import { CircleNotch } from '@phosphor-icons/react';
+import { Lightbox } from '../Core/Lightbox';
 
 export const ChatWindow: React.FC = () => {
   const { friendId } = useParams<{ friendId: string }>();
@@ -26,6 +27,8 @@ export const ChatWindow: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const sendingLock = useRef(false);
   const timerRef = useRef<number | null>(null);
+
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
 
   const isCodex = friendId === 'codex';
 
@@ -53,12 +56,9 @@ export const ChatWindow: React.FC = () => {
              if (ignore) return;
              setMessages(msgs);
              
-             // Setup realtime subscription for codex
-             // Important: Assign the channel subscription to the local variable for cleanup
              channel = supabase.channel('codex_chat_v2')
                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: 'receiver_id=eq.codex' }, payload => {
                   setMessages(prev => {
-                      // Prevent duplicates
                       if (prev.find(m => m.id === payload.new.id)) return prev;
                       return [...prev, payload.new as Message];
                   });
@@ -72,6 +72,20 @@ export const ChatWindow: React.FC = () => {
              const friend = (await api.getAllProfiles()).find(p => p.id === friendId);
              if (ignore) return;
              setFriendProfile(friend);
+             
+             // Setup subscription for DM
+             channel = supabase.channel(`dm:${user.id}:${friendId}`)
+               .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, payload => {
+                   const msg = payload.new as Message;
+                   // Filter logic
+                   if ((msg.sender_id === user.id && msg.receiver_id === friendId) || (msg.sender_id === friendId && msg.receiver_id === user.id)) {
+                        setMessages(prev => {
+                           if (prev.find(m => m.id === msg.id)) return prev;
+                           return [...prev, msg];
+                        });
+                   }
+               })
+               .subscribe();
         }
       }
     };
@@ -152,9 +166,8 @@ export const ChatWindow: React.FC = () => {
             };
 
             recorder.onstop = async () => {
-                // If duration was too short, maybe cancel? For now just send.
                 const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-                if (audioBlob.size > 1000) { // arbitrary small size check
+                if (audioBlob.size > 1000) { 
                     const audioFile = new File([audioBlob], `voice_${Date.now()}.webm`, { type: 'audio/webm' });
                     try {
                         const url = await api.uploadFile(audioFile);
@@ -179,7 +192,7 @@ export const ChatWindow: React.FC = () => {
 
   const cancelRecording = () => {
       if (mediaRecorderRef.current) {
-          mediaRecorderRef.current.onstop = null; // Prevent sending
+          mediaRecorderRef.current.onstop = null; 
           mediaRecorderRef.current.stop();
           mediaRecorderRef.current.stream.getTracks().forEach(t => t.stop());
       }
@@ -202,6 +215,8 @@ export const ChatWindow: React.FC = () => {
   };
 
   return (
+    <>
+    <Lightbox isOpen={!!lightboxSrc} src={lightboxSrc || ''} onClose={() => setLightboxSrc(null)} />
     <motion.div 
       {...theme.motion.page}
       style={{ 
@@ -294,7 +309,12 @@ export const ChatWindow: React.FC = () => {
                 }}
               >
                 {msg.type === 'image' ? (
-                    <img src={msg.media_url} alt="attachment" style={{ width: '100%', maxWidth: '200px', borderRadius: theme.radius.md, display: 'block' }} />
+                    <img 
+                      src={msg.media_url} 
+                      alt="attachment" 
+                      onClick={() => setLightboxSrc(msg.media_url || '')}
+                      style={{ width: '100%', maxWidth: '200px', borderRadius: theme.radius.md, display: 'block', cursor: 'pointer' }} 
+                    />
                 ) : msg.type === 'audio' ? (
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: '160px' }}>
                         <audio controls src={msg.media_url} style={{ height: '30px', width: '200px', filter: 'invert(1) grayscale(1)' }} />
@@ -430,5 +450,6 @@ export const ChatWindow: React.FC = () => {
         </motion.div>
       </div>
     </motion.div>
+    </>
   );
 };

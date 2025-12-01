@@ -1,21 +1,23 @@
 
 import React, { useEffect, useState, useRef } from 'react';
 import { PostCard } from '../Package/PostCard';
-import { api } from '../../services/supabaseClient';
+import { api, supabase } from '../../services/supabaseClient';
 import { Post, CurrentUser } from '../../types';
-import { CircleNotch, Image as ImageIcon, PaperPlaneRight, Sun, Moon } from '@phosphor-icons/react';
+import { CircleNotch, Image as ImageIcon, PaperPlaneRight, Sun, Moon, Bell } from '@phosphor-icons/react';
 import { Avatar } from '../Core/Avatar';
 import { Button } from '../Core/Button';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { DS } from '../../Theme';
 import { useTheme } from '../../ThemeContext';
 
 export const Feed: React.FC = () => {
   const { mode, toggleTheme } = useTheme();
+  const navigate = useNavigate();
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   // Input State
   const [caption, setCaption] = useState('');
@@ -33,6 +35,13 @@ export const Feed: React.FC = () => {
         ]);
         setCurrentUser(user);
         setPosts(feedData);
+        
+        // Initial Notification Check
+        if (user) {
+             const notifs = await api.getNotifications();
+             setUnreadCount(notifs.filter(n => !n.is_read).length);
+        }
+
       } catch (e) {
         console.error(e);
       } finally {
@@ -40,6 +49,26 @@ export const Feed: React.FC = () => {
       }
     };
     loadData();
+    
+    // Realtime Notification Subscription
+    let channel: any;
+    api.getCurrentUser().then(user => {
+       if(!user) return;
+       channel = supabase.channel('public:notifications')
+       .on(
+          'postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` },
+          (payload) => {
+              setUnreadCount(prev => prev + 1);
+          }
+       )
+       .subscribe();
+    });
+
+    return () => {
+        if(channel) supabase.removeChannel(channel);
+    };
+
   }, []);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -121,6 +150,18 @@ export const Feed: React.FC = () => {
            </h1>
            
            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+             <Button variant="ghost" size="icon" onClick={() => navigate('/activity')} style={{ position: 'relative' }}>
+                <Bell size={24} />
+                {unreadCount > 0 && (
+                    <span style={{ 
+                        position: 'absolute', top: 6, right: 6, 
+                        width: '8px', height: '8px', 
+                        background: DS.Color.Accent.Surface, 
+                        borderRadius: '50%',
+                        border: `1px solid ${DS.Color.Base.Surface[1]}`
+                    }} />
+                )}
+             </Button>
              <Button variant="ghost" size="icon" onClick={toggleTheme}>
                {mode === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
              </Button>

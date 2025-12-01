@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { HashRouter as Router, Routes, Route, useLocation, Navigate } from 'react-router-dom';
 import { Feed } from './components/Section/Feed';
 import { Nav } from './components/Package/Nav';
@@ -7,14 +7,16 @@ import { ChatWindow } from './components/Section/ChatWindow';
 import { MessagesList } from './components/Section/MessagesList';
 import { Profile } from './components/Page/Profile';
 import { Login } from './components/Page/Login';
-import { LiveCall } from './components/Page/LiveCall';
+import { Activity } from './components/Page/Activity';
 import { GroupCall } from './components/Page/GroupCall';
 import { PostDetail } from './components/Page/PostDetail';
 import { theme } from './Theme';
 import { ThemeProvider } from './ThemeContext';
-import { AnimatePresence } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { CircleNotch } from '@phosphor-icons/react';
+import { api, supabase } from './services/supabaseClient';
+import { DS } from './Theme';
 
 // --- Auth Guard ---
 const RequireAuth = ({ children }: { children?: React.ReactNode }) => {
@@ -49,12 +51,55 @@ const AnimatedRoutes = () => {
         <Route path="/post/:postId" element={<RequireAuth><PostDetail /></RequireAuth>} />
         <Route path="/messages" element={<RequireAuth><MessagesList /></RequireAuth>} />
         <Route path="/messages/:friendId" element={<RequireAuth><ChatWindow /></RequireAuth>} />
-        <Route path="/live" element={<RequireAuth><LiveCall /></RequireAuth>} />
         <Route path="/call/:roomId" element={<RequireAuth><GroupCall /></RequireAuth>} />
+        <Route path="/activity" element={<RequireAuth><Activity /></RequireAuth>} />
       </Routes>
     </AnimatePresence>
   );
 };
+
+const NotificationContainer = () => {
+    const { user } = useAuth();
+    const [toast, setToast] = useState<{ message: string, visible: boolean } | null>(null);
+
+    useEffect(() => {
+        if(!user) return;
+        const channel = supabase.channel('global_notif_listener')
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` }, payload => {
+                const type = payload.new.type;
+                let msg = "New notification";
+                if(type === 'like') msg = "Someone liked your moment";
+                if(type === 'comment') msg = "New comment on your moment";
+                if(type === 'follow') msg = "You have a new follower";
+                
+                setToast({ message: msg, visible: true });
+                setTimeout(() => setToast(null), 3000);
+            })
+            .subscribe();
+
+        return () => { supabase.removeChannel(channel); };
+    }, [user]);
+
+    return (
+        <AnimatePresence>
+            {toast && (
+                <motion.div 
+                    initial={{ opacity: 0, y: -20, x: '-50%' }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -20 }}
+                    style={{ 
+                        position: 'fixed', top: '24px', left: '50%', transform: 'translateX(-50%)', 
+                        background: DS.Color.Accent.Surface, color: 'white', padding: '12px 24px', 
+                        borderRadius: DS.Radius.Full, boxShadow: DS.Effect.Shadow.Soft, zIndex: 9999,
+                        fontWeight: 600, fontSize: '14px'
+                    }}
+                >
+                    {toast.message}
+                </motion.div>
+            )}
+        </AnimatePresence>
+    )
+}
 
 const AppLayout: React.FC = () => {
   const { user } = useAuth();
@@ -70,6 +115,7 @@ const AppLayout: React.FC = () => {
       overflowX: 'hidden',
       transition: 'background-color 0.6s cubic-bezier(0.22, 1, 0.36, 1), color 0.6s cubic-bezier(0.22, 1, 0.36, 1)'
     }}>
+      <NotificationContainer />
       <AnimatedRoutes />
       {/* Only show Nav if logged in and not on login page (handled by Nav internal check mostly, but safer here too) */}
       {user && <Nav />}

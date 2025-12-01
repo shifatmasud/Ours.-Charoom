@@ -1,9 +1,9 @@
 
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Microphone, MicrophoneSlash, PhoneDisconnect, Users, VideoCamera, VideoCameraSlash, Screencast, DesktopTower } from '@phosphor-icons/react';
-import { motion } from 'framer-motion';
-import { theme, commonStyles } from '../../Theme';
+import { Microphone, MicrophoneSlash, PhoneDisconnect, Users, VideoCamera, VideoCameraSlash, Screencast, DesktopTower, ArrowsOut } from '@phosphor-icons/react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { theme, commonStyles, DS } from '../../Theme';
 import { api, supabase } from '../../services/supabaseClient';
 import { CurrentUser } from '../../types';
 
@@ -33,6 +33,7 @@ export const GroupCall: React.FC = () => {
   const [isVideoEnabled, setIsVideoEnabled] = useState(false);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [status, setStatus] = useState('Initializing void...');
+  const [fullScreenPeerId, setFullScreenPeerId] = useState<string | null>(null);
 
   // Refs for stability in callbacks
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -86,7 +87,6 @@ export const GroupCall: React.FC = () => {
 
         channel.on('broadcast', { event: 'join' }, ({ payload }: any) => {
             if (payload.userId === user.id) return;
-            console.log('User joined:', payload.userId);
             // If someone joins, we (existing user) initiate the connection
             createPeer(payload.userId, true);
         });
@@ -300,8 +300,6 @@ export const GroupCall: React.FC = () => {
   const toggleScreenShare = async () => {
       if (isScreenSharing) {
           // Stop screen share -> revert to Camera if enabled, or stop video
-          // Simplification: Toggle off screen share stops video track.
-          // If they want camera back, they click video button.
           localStreamRef.current?.getVideoTracks().forEach(t => { t.stop(); localStreamRef.current?.removeTrack(t); });
           Object.values(peersRef.current).forEach((peer: Peer) => {
             const senders = peer.connection.getSenders();
@@ -375,6 +373,34 @@ export const GroupCall: React.FC = () => {
         overflow: 'hidden'
       }}
     >
+        {/* Full Screen Overlay */}
+        <AnimatePresence>
+            {fullScreenPeerId && (
+                <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    style={{ position: 'absolute', inset: 0, zIndex: 3000, background: 'black', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                    onClick={() => setFullScreenPeerId(null)}
+                >
+                    {fullScreenPeerId === 'local' ? (
+                        <video 
+                            ref={(el) => { if(el && localVideoRef.current) el.srcObject = localVideoRef.current.srcObject; }}
+                            autoPlay muted 
+                            style={{ width: '100%', height: '100%', objectFit: 'contain' }} 
+                        />
+                    ) : (
+                         peers[fullScreenPeerId] && (
+                            <FullScreenVideo peer={peers[fullScreenPeerId]} />
+                         )
+                    )}
+                    <button style={{ position: 'absolute', top: 24, right: 24, background: 'rgba(0,0,0,0.5)', borderRadius: '50%', border: 'none', color: 'white', padding: '12px' }}>
+                        <ArrowsOut size={24} />
+                    </button>
+                </motion.div>
+            )}
+        </AnimatePresence>
+
         {/* Header */}
         <div style={{ padding: '32px', textAlign: 'center', zIndex: 10 }}>
             <h2 style={{ color: theme.colors.text2, fontSize: '14px', letterSpacing: '2px', textTransform: 'uppercase' }}>
@@ -387,7 +413,10 @@ export const GroupCall: React.FC = () => {
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '24px', flexWrap: 'wrap', padding: '24px', overflowY: 'auto' }}>
             
             {/* Me */}
-            <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+            <div 
+                onClick={() => (isVideoEnabled || isScreenSharing) && setFullScreenPeerId('local')}
+                style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', cursor: (isVideoEnabled || isScreenSharing) ? 'pointer' : 'default' }}
+            >
                 <div style={{ 
                     width: isVideoEnabled || isScreenSharing ? '240px' : '100px', 
                     height: isVideoEnabled || isScreenSharing ? '180px' : '100px', 
@@ -410,7 +439,7 @@ export const GroupCall: React.FC = () => {
 
             {/* Remote Peers */}
             {Object.values(peers).map((peer: Peer) => (
-                <RemotePeer key={peer.id} peer={peer} />
+                <RemotePeer key={peer.id} peer={peer} onMaximize={() => setFullScreenPeerId(peer.id)} />
             ))}
         </div>
 
@@ -438,7 +467,7 @@ export const GroupCall: React.FC = () => {
   );
 };
 
-const RemotePeer: React.FC<{ peer: Peer }> = ({ peer }) => {
+const RemotePeer: React.FC<{ peer: Peer, onMaximize: () => void }> = ({ peer, onMaximize }) => {
     const videoRef = useRef<HTMLVideoElement>(null);
     const [hasVideo, setHasVideo] = useState(false);
 
@@ -447,9 +476,9 @@ const RemotePeer: React.FC<{ peer: Peer }> = ({ peer }) => {
             videoRef.current.srcObject = peer.stream;
             videoRef.current.play().catch(e => console.error("Play error", e));
             
-            // Check tracks
             const checkVideo = () => {
-               setHasVideo(peer.stream?.getVideoTracks().some(t => t.readyState === 'live' && t.enabled) || false);
+               const videoTracks = peer.stream?.getVideoTracks();
+               setHasVideo(videoTracks && videoTracks.length > 0 && videoTracks[0].readyState === 'live' && videoTracks[0].enabled);
             };
             checkVideo();
             peer.stream.addEventListener('addtrack', checkVideo);
@@ -465,7 +494,8 @@ const RemotePeer: React.FC<{ peer: Peer }> = ({ peer }) => {
         <motion.div 
            initial={{ opacity: 0, scale: 0.5 }}
            animate={{ opacity: 1, scale: 1 }}
-           style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}
+           onClick={() => hasVideo && onMaximize()}
+           style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', cursor: hasVideo ? 'pointer' : 'default' }}
         >
              <div style={{ 
                 width: hasVideo ? '240px' : '100px', 
@@ -483,6 +513,18 @@ const RemotePeer: React.FC<{ peer: Peer }> = ({ peer }) => {
              <span style={{ color: theme.colors.text1, fontSize: '14px', fontWeight: 500 }}>User {peer.id.slice(0, 4)}</span>
         </motion.div>
     );
+};
+
+// Simple FullScreen wrapper
+const FullScreenVideo: React.FC<{ peer: Peer }> = ({ peer }) => {
+    const videoRef = useRef<HTMLVideoElement>(null);
+    useEffect(() => {
+        if(videoRef.current && peer.stream) {
+            videoRef.current.srcObject = peer.stream;
+            videoRef.current.play();
+        }
+    }, [peer]);
+    return <video ref={videoRef} style={{ width: '100%', height: '100%', objectFit: 'contain' }} autoPlay playsInline />;
 };
 
 const ControlButton = ({ onClick, active, icon: Icon }: any) => (

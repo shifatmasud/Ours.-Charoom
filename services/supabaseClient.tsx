@@ -155,9 +155,6 @@ export const api = {
     } else {
       await supabase.auth.signOut();
     }
-    // Optional: Clear deletions on sign out to respect new session, 
-    // but often safer to keep them if they are just "hidden" mock posts.
-    // For now, we leave them in localStorage so the user doesn't see "zombie" posts return.
     window.location.href = '/';
   },
 
@@ -192,14 +189,6 @@ export const api = {
 
   // --- Profiles ---
   getUserProfile: async (userId: string): Promise<Profile> => {
-    if (userId === 'codex') {
-        return {
-            id: 'codex',
-            username: 'Codex',
-            avatar_url: 'https://picsum.photos/seed/codex/100/100', // Placeholder
-            bio: 'The Global Void.'
-        };
-    }
     if (userId === MOCK_USER.id) return MOCK_USER;
 
     // Always try DB first (even for guest) so we can see seeded users
@@ -328,10 +317,6 @@ export const api = {
             .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     }
     
-    // For regular users, respect server state mostly.
-    // data ? realPosts means: if server call succeeded (data is not null), use realPosts (even if empty).
-    // This prevents falling back to MOCK if I have 0 posts.
-    // MOCK_POSTS only used if data is null (connection error).
     const resultPosts = data ? realPosts : MOCK_POSTS;
     return resultPosts.filter(p => !DELETED_POST_IDS.has(p.id));
   },
@@ -483,8 +468,6 @@ export const api = {
     }
 
     // 4. Local Optimistic Update
-    // We add to deleted set to ensure UI consistency immediately without refetch,
-    // though the item is permanently gone from DB.
     DELETED_POST_IDS.add(postId);
     saveSet(KEYS.DELETED_POSTS, DELETED_POST_IDS);
   },
@@ -499,6 +482,15 @@ export const api = {
        await supabase.from('likes').delete().eq('id', data.id);
     } else {
        await supabase.from('likes').insert({ user_id: userId, post_id: postId });
+       // Insert notification
+       if (userId !== ownerId) {
+          await supabase.from('notifications').insert({
+              user_id: ownerId,
+              type: 'like',
+              reference_id: postId,
+              is_read: false
+          });
+       }
     }
   },
 
@@ -521,13 +513,10 @@ export const api = {
     if (isGuestMode()) {
         const local = MOCK_COMMENTS.filter(c => c.post_id === postId);
         const all = [...comments, ...local];
-        // Filter deleted
         return all.filter(c => !DELETED_COMMENT_IDS.has(c.id))
                   .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
     }
 
-    // For real users, we use server data. Only use mock fallback if server data is empty AND we suspect mock items should exist.
-    // Here we prioritize server data if available.
     return comments.length > 0 ? comments.filter(c => !DELETED_COMMENT_IDS.has(c.id)) : MOCK_COMMENTS.filter(c => c.post_id === postId);
   },
 
@@ -552,6 +541,18 @@ export const api = {
       .single();
       
     if (error) throw error;
+    
+    // Notify post owner
+    const { data: post } = await supabase.from('posts').select('user_id').eq('id', postId).single();
+    if (post && post.user_id !== userId) {
+        await supabase.from('notifications').insert({
+            user_id: post.user_id,
+            type: 'comment',
+            reference_id: postId,
+            is_read: false
+        });
+    }
+    
     return { ...data, profile: data.profile };
   },
 
@@ -577,6 +578,12 @@ export const api = {
   followUser: async (followerId: string, targetId: string): Promise<void> => {
     if (isGuestMode()) { MOCK_FOLLOWS.add(`${followerId}:${targetId}`); return; }
     await supabase.from('follows').insert({ follower_id: followerId, following_id: targetId });
+    await supabase.from('notifications').insert({
+        user_id: targetId,
+        type: 'follow',
+        reference_id: followerId,
+        is_read: false
+    });
   },
 
   unfollowUser: async (followerId: string, targetId: string): Promise<void> => {
@@ -587,11 +594,8 @@ export const api = {
   // --- Messaging ---
   getMessages: async (friendId: string): Promise<Message[]> => {
     if (friendId === 'codex') {
-        // Return global/group messages
-        // Prioritize persistent MOCK messages if they exist (for Guest or Hybrid)
         if (isGuestMode()) return MOCK_MESSAGES.filter(m => m.receiver_id === 'codex');
         
-        // Even for real users, we might want to check DB but fallback to mock if DB is empty to show something
         const { data, error } = await supabase
             .from('messages')
             .select('*')
@@ -627,12 +631,9 @@ export const api = {
 
   getLastMessage: async (friendId: string): Promise<Message | null> => {
     if (friendId === 'codex') {
-        // Last message from codex
         const { data } = await supabase.from('messages').select('*').eq('receiver_id', 'codex').order('created_at', { ascending: false }).limit(1);
         const dbMsg = data?.[0];
         const mockMsg = MOCK_MESSAGES.filter(m => m.receiver_id === 'codex').pop();
-        
-        // Return whichever is newer
         if (dbMsg && mockMsg) {
              return new Date(dbMsg.created_at) > new Date(mockMsg.created_at) ? dbMsg : mockMsg;
         }
@@ -674,43 +675,11 @@ export const api = {
     if (isGuestMode() || receiverId === 'codex') {
         const mockMsg = { ...newMessage };
         MOCK_MESSAGES.push(mockMsg);
-        saveMockMessages(); // Persist to storage
-
-        if (receiverId !== 'codex' && !isGuestMode()) {
-            // If not codex and real user, also save to DB
-        }
+        saveMockMessages(); 
         
-        if (receiverId !== 'codex' && isGuestMode()) {
-            // Auto reply for guest
-             setTimeout(() => {
-                const replies = [
-                    "That's interesting! Tell me more.",
-                    "I'm just a simulation, but I'm listening.",
-                    "Cool perspective!",
-                    "Sending bytes from the void... 🌌",
-                    "Can't wait to see real updates."
-                ];
-                const randomReply = replies[Math.floor(Math.random() * replies.length)];
-                
-                const replyMsg: Message = {
-                    id: `reply_${Date.now()}`,
-                    sender_id: receiverId,
-                    receiver_id: senderId,
-                    content: randomReply,
-                    created_at: new Date().toISOString(),
-                    type: 'text'
-                };
-                MOCK_MESSAGES.push(replyMsg);
-                saveMockMessages();
-            }, 2000);
-        }
-        
-        // Try saving to Supabase for Codex if possible (Real users)
         if (receiverId === 'codex' && !isGuestMode()) {
-             // We also save to local mock just in case DB fails or isn't subscribed efficiently for immediate feedback
              await supabase.from('messages').insert({ sender_id: senderId, receiver_id: receiverId, content, type, media_url: mediaUrl });
         }
-        
         return;
     }
     
@@ -737,7 +706,46 @@ export const api = {
     return data.publicUrl;
   },
 
+  // --- Notifications (Real) ---
   getNotifications: async (): Promise<Notification[]> => {
-     return []; 
+    if (isGuestMode()) return [];
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return [];
+
+    const { data } = await supabase
+        .from('notifications')
+        .select(`
+            *,
+            sender_profile:profiles!notifications_sender_id_fkey(*)
+        `) // Assuming explicit foreign key setup in Supabase, or using sender_id join
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(20);
+
+    if (data) {
+        // Map sender profile from query if available, otherwise fetch locally or use sender_id
+        // The query above assumes a relationship. If not strict, we map manually:
+        const notifications: Notification[] = [];
+        for (const n of data) {
+             let sender = n.sender_profile;
+             // If not joined, fetch manually (rare fallback)
+             if (!sender && n.sender_id) {
+                 const { data: p } = await supabase.from('profiles').select('*').eq('id', n.sender_id).single();
+                 sender = p;
+             }
+             notifications.push({
+                 ...n,
+                 sender_profile: sender || { id: 'unknown', username: 'Unknown', avatar_url: '' }
+             });
+        }
+        return notifications;
+    }
+    return [];
+  },
+
+  markNotificationRead: async (notifId: string) => {
+      if (isGuestMode()) return;
+      await supabase.from('notifications').update({ is_read: true }).eq('id', notifId);
   }
 };

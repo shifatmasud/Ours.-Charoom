@@ -35,6 +35,14 @@ export const PostDetail: React.FC = () => {
     loadData();
   }, [postId]);
 
+  const handleBack = () => {
+     if (window.history.length > 2) {
+         navigate(-1);
+     } else {
+         navigate('/', { replace: true });
+     }
+  };
+
   if (loading) {
     return (
       <div style={{ ...commonStyles.flexCenter, height: '100vh', width: '100%', background: theme.colors.surface1 }}>
@@ -74,7 +82,7 @@ export const PostDetail: React.FC = () => {
           background: DS.Color.Base.Surface[1],
         }}>
            <button 
-             onClick={() => navigate(-1)} 
+             onClick={handleBack} 
              style={{ 
                background: 'none', 
                border: 'none', 

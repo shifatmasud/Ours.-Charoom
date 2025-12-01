@@ -10,6 +10,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { DS } from '../../Theme';
 import { useTheme } from '../../ThemeContext';
+import { Confetti } from '../Core/Confetti';
 
 export const Feed: React.FC = () => {
   const { mode, toggleTheme } = useTheme();
@@ -25,6 +26,11 @@ export const Feed: React.FC = () => {
   const [preview, setPreview] = useState<string | null>(null);
   const [isPosting, setIsPosting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Easter Egg State
+  const [showConfetti, setShowConfetti] = useState(false);
+  const [showEasterEgg, setShowEasterEgg] = useState(false);
+  const pressTimer = useRef<number | null>(null);
 
   useEffect(() => {
     const loadData = async () => {
@@ -67,6 +73,7 @@ export const Feed: React.FC = () => {
 
     return () => {
         if(channel) supabase.removeChannel(channel);
+        if (pressTimer.current) clearTimeout(pressTimer.current);
     };
 
   }, []);
@@ -116,6 +123,29 @@ export const Feed: React.FC = () => {
     }
   };
 
+  // Easter Egg Handlers
+  const handleLogoStart = (e: React.SyntheticEvent) => {
+    // Prevent context menu on long press for touch devices
+    // e.preventDefault() here might block scroll if not careful, 
+    // but we use touchAction: none in style to handle it better.
+    pressTimer.current = window.setTimeout(() => {
+        triggerEasterEgg();
+    }, 300);
+  };
+
+  const handleLogoEnd = () => {
+    if (pressTimer.current) {
+        clearTimeout(pressTimer.current);
+        pressTimer.current = null;
+    }
+  };
+
+  const triggerEasterEgg = () => {
+    if (navigator.vibrate) navigator.vibrate([50, 50, 50]);
+    setShowConfetti(true);
+    setShowEasterEgg(true);
+  };
+
   if (loading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', background: DS.Color.Base.Surface[1] }}>
@@ -145,9 +175,19 @@ export const Feed: React.FC = () => {
           zIndex: 50,
           background: DS.Color.Base.Surface[1], // Opaque for scroll
         }}>
-           <h1 style={{ fontSize: '32px', color: DS.Color.Base.Content[1], ...DS.Type.Expressive.Display }}>
-             OURS<span style={{ color: DS.Color.Accent.Surface }}>.</span>
-           </h1>
+           <div
+             onMouseDown={handleLogoStart}
+             onMouseUp={handleLogoEnd}
+             onMouseLeave={handleLogoEnd}
+             onTouchStart={handleLogoStart}
+             onTouchEnd={handleLogoEnd}
+             onContextMenu={(e) => e.preventDefault()}
+             style={{ cursor: 'pointer', userSelect: 'none', WebkitUserSelect: 'none', touchAction: 'none' }}
+           >
+             <h1 style={{ fontSize: '32px', color: DS.Color.Base.Content[1], ...DS.Type.Expressive.Display, pointerEvents: 'none' }}>
+               OURS<span style={{ color: DS.Color.Accent.Surface }}>.</span>
+             </h1>
+           </div>
            
            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
              <Button variant="ghost" size="icon" onClick={() => navigate('/activity')} style={{ position: 'relative' }}>
@@ -250,6 +290,57 @@ export const Feed: React.FC = () => {
         <div style={{ height: '100px', display: 'flex', justifyContent: 'center', alignItems: 'center', opacity: 0.3 }}>
            <div style={{ width: '4px', height: '4px', borderRadius: '50%', background: DS.Color.Base.Content[3] }}></div>
         </div>
+
+        {/* Easter Egg Overlay */}
+        <AnimatePresence>
+            {showEasterEgg && (
+                <>
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        onClick={() => { setShowEasterEgg(false); setShowConfetti(false); }}
+                        style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 9998, backdropFilter: 'blur(4px)' }}
+                    />
+                    <motion.div
+                        initial={{ opacity: 0, scale: 0.8, y: '-50%', x: '-50%' }}
+                        animate={{ opacity: 1, scale: 1, y: '-50%', x: '-50%' }}
+                        exit={{ opacity: 0, scale: 0.8, y: '-50%', x: '-50%' }}
+                        style={{
+                            position: 'fixed', top: '50%', left: '50%',
+                            zIndex: 9999,
+                            background: DS.Color.Base.Surface[2],
+                            padding: '32px',
+                            borderRadius: DS.Radius.L,
+                            border: `1px solid ${DS.Color.Accent.Surface}`,
+                            textAlign: 'center',
+                            width: '90%',
+                            maxWidth: '400px',
+                            boxShadow: `0 0 50px ${DS.Color.Accent.Surface}40`
+                        }}
+                    >
+                        <h2 style={{ 
+                            fontSize: '20px', 
+                            color: DS.Color.Base.Content[1], 
+                            marginBottom: '24px', 
+                            lineHeight: 1.5,
+                            fontFamily: DS.Type.Readable.Body.fontFamily 
+                        }}>
+                            যে বাল ছিড়তে পারবা না, সে বাল টানতে যাইও না
+                        </h2>
+                        <Button 
+                            variant="primary" 
+                            onClick={() => { setShowEasterEgg(false); setShowConfetti(false); }}
+                            style={{ width: '100%' }}
+                        >
+                            Okay
+                        </Button>
+                    </motion.div>
+                </>
+            )}
+        </AnimatePresence>
+        {showConfetti && <Confetti />}
+
       </div>
     </div>
   );

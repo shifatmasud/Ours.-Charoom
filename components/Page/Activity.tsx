@@ -156,7 +156,15 @@ export const Activity: React.FC = () => {
   );
 };
 
-const NotificationItem = ({ notification, index, icon, iconBg, onClick }: { notification: Notification, index: number, icon: React.ReactNode, iconBg: string, onClick: () => void }) => {
+interface NotificationItemProps {
+    notification: Notification;
+    index: number;
+    icon: React.ReactNode;
+    iconBg: string;
+    onClick: () => void;
+}
+
+const NotificationItem: React.FC<NotificationItemProps> = ({ notification, index, icon, iconBg, onClick }) => {
     let timeLabel = '';
     try {
         timeLabel = formatDistanceToNow(new Date(notification.created_at), { addSuffix: true })

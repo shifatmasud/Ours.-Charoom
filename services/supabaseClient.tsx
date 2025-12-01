@@ -587,51 +587,25 @@ export const api = {
   // --- Messaging ---
   getMessages: async (friendId: string): Promise<Message[]> => {
     if (friendId === 'codex') {
-        // 1. Fetch Real Global Data (Always try, even for guests)
-        const { data } = await supabase
+        // Return global/group messages
+        // Prioritize persistent MOCK messages if they exist (for Guest or Hybrid)
+        if (isGuestMode()) return MOCK_MESSAGES.filter(m => m.receiver_id === 'codex');
+        
+        // Even for real users, we might want to check DB but fallback to mock if DB is empty to show something
+        const { data, error } = await supabase
             .from('messages')
             .select('*')
             .eq('receiver_id', 'codex')
             .order('created_at', { ascending: true });
-        
-        const realMessages = data || [];
-        
-        // 2. Get Local/Mock Data (for optimistic updates or guest isolation)
-        const localMessages = MOCK_MESSAGES.filter(m => m.receiver_id === 'codex');
-
-        // 3. Merge Strategies
-        // We use a Map to deduplicate based on ID. 
-        // If IDs collide, we generally trust the one from DB (realMessages) but practically they are the same object structure.
-        const messageMap = new Map<string, Message>();
-        
-        // Populate with real messages first
-        realMessages.forEach(m => messageMap.set(m.id, m));
-        
-        // Add local messages if they aren't already in the list
-        // Note: When syncing to DB, if the ID was generated locally and sent, it might match. 
-        // If DB generated a new UUID, we might have duplicates. 
-        // To fix visual duplicates for the *sender*: we filter out local messages that match the content/sender of a recent real message.
-        // But for simplicity in this "void" theme, we just overlay them.
-        localMessages.forEach(m => {
-            if (!messageMap.has(m.id)) {
-                // Heuristic: check if we have a duplicate by content/timestamp to avoid "double echo"
-                const duplicate = realMessages.find(rm => 
-                    rm.sender_id === m.sender_id && 
-                    rm.content === m.content && 
-                    Math.abs(new Date(rm.created_at).getTime() - new Date(m.created_at).getTime()) < 5000
-                );
-                if (!duplicate) {
-                    messageMap.set(m.id, m);
-                }
-            }
-        });
-
-        const merged = Array.from(messageMap.values());
-        return merged.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+            
+        if (error || !data || data.length === 0) {
+             return MOCK_MESSAGES.filter(m => m.receiver_id === 'codex');
+        }
+        return data || [];
     }
 
     if (isGuestMode()) {
-        // Return messages exchanged between Guest and Friend (Local Only)
+        // Return messages exchanged between Guest and Friend
         return MOCK_MESSAGES.filter(m => 
             (m.sender_id === MOCK_USER.id && m.receiver_id === friendId) || 
             (m.sender_id === friendId && m.receiver_id === MOCK_USER.id)
@@ -653,7 +627,7 @@ export const api = {
 
   getLastMessage: async (friendId: string): Promise<Message | null> => {
     if (friendId === 'codex') {
-        // Last message from codex (Check DB first)
+        // Last message from codex
         const { data } = await supabase.from('messages').select('*').eq('receiver_id', 'codex').order('created_at', { ascending: false }).limit(1);
         const dbMsg = data?.[0];
         const mockMsg = MOCK_MESSAGES.filter(m => m.receiver_id === 'codex').pop();
@@ -697,37 +671,16 @@ export const api = {
         created_at: new Date().toISOString()
     };
 
-    // Codex: Always Sync + Optimistic Local
-    if (receiverId === 'codex') {
-        // 1. Try Saving to DB
-        const { error } = await supabase.from('messages').insert({ 
-            sender_id: senderId, 
-            receiver_id: receiverId, 
-            content, 
-            type, 
-            media_url: mediaUrl 
-        });
-
-        // 2. Local Fallback/Optimistic Update
-        // If guest, always save locally. If real user, only if DB failed (to avoid duplicate echo on next fetch, 
-        // since getMessages handles the merge carefully now, we can save it safely if we want offline support).
-        // For Codex, guests MUST rely on local mock if the DB insert fails due to permissions (e.g. strict FKs).
-        if (isGuestMode() || error) {
-             MOCK_MESSAGES.push(newMessage);
-             saveMockMessages();
-        }
-        
-        // Note: For real users, successful DB insert implies it will show up in the subscription or next fetch.
-        // We don't push to MOCK_MESSAGES for real users on success to keep MOCK clean.
-        return;
-    }
-
-    if (isGuestMode()) {
+    if (isGuestMode() || receiverId === 'codex') {
         const mockMsg = { ...newMessage };
         MOCK_MESSAGES.push(mockMsg);
         saveMockMessages(); // Persist to storage
 
-        if (receiverId !== 'codex') {
+        if (receiverId !== 'codex' && !isGuestMode()) {
+            // If not codex and real user, also save to DB
+        }
+        
+        if (receiverId !== 'codex' && isGuestMode()) {
             // Auto reply for guest
              setTimeout(() => {
                 const replies = [
@@ -750,6 +703,12 @@ export const api = {
                 MOCK_MESSAGES.push(replyMsg);
                 saveMockMessages();
             }, 2000);
+        }
+        
+        // Try saving to Supabase for Codex if possible (Real users)
+        if (receiverId === 'codex' && !isGuestMode()) {
+             // We also save to local mock just in case DB fails or isn't subscribed efficiently for immediate feedback
+             await supabase.from('messages').insert({ sender_id: senderId, receiver_id: receiverId, content, type, media_url: mediaUrl });
         }
         
         return;

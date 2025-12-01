@@ -1,8 +1,8 @@
-
 import React, { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { DS } from '../../Theme';
 import { ParticleBurst } from './ParticleBurst';
+import { StateLayer } from './StateLayer';
 
 interface ButtonProps {
   onClick?: () => void;
@@ -30,8 +30,12 @@ export const Button: React.FC<ButtonProps> = ({
   const [isHovered, setIsHovered] = useState(false);
   const [isPressed, setIsPressed] = useState(false);
   const [showBurst, setShowBurst] = useState(false);
+  
+  // State Layer Coordinates
+  const [coords, setCoords] = useState({ x: 0, y: 0 });
+  const [dims, setDims] = useState({ width: 0, height: 0 });
 
-  const handleClick = () => {
+  const handleClick = (e: React.MouseEvent) => {
     if (disabled) return;
     if (!noBurst) {
       setShowBurst(true);
@@ -40,10 +44,35 @@ export const Button: React.FC<ButtonProps> = ({
     onClick?.();
   };
 
+  const handlePointerEnter = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (disabled) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    setCoords({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+    setDims({ width: rect.width, height: rect.height });
+    setIsHovered(true);
+  };
+
+  const handlePointerLeave = () => {
+    setIsHovered(false);
+    setIsPressed(false);
+  };
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (disabled) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    setCoords({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+    setDims({ width: rect.width, height: rect.height });
+    setIsPressed(true);
+  };
+
+  const handlePointerUp = () => {
+    setIsPressed(false);
+  };
+
   // --- Styles ---
   const baseStyle: React.CSSProperties = {
     position: 'relative',
-    overflow: 'visible', // Allow particles to escape
+    overflow: 'visible', // Allow particles to escape, we clip StateLayer internally
     border: 'none',
     outline: 'none',
     cursor: disabled ? 'not-allowed' : 'pointer',
@@ -96,43 +125,35 @@ export const Button: React.FC<ButtonProps> = ({
     ...style // Ensure style prop overrides variant defaults
   };
 
+  const rippleColor = variant === 'primary' ? DS.Color.Accent.Content : DS.Color.Base.Content[1];
+
   return (
     <motion.button
       type={type}
       onClick={handleClick}
+      onPointerEnter={handlePointerEnter}
+      onPointerLeave={handlePointerLeave}
+      onPointerDown={handlePointerDown}
+      onPointerUp={handlePointerUp}
       disabled={disabled}
-      onHoverStart={() => setIsHovered(true)}
-      onHoverEnd={() => setIsHovered(false)}
-      onTapStart={() => setIsPressed(true)}
-      onTapCancel={() => setIsPressed(false)}
-      onTap={() => setIsPressed(false)}
       style={appliedStyle}
       className={className}
       layout
     >
-      {/* Particles Reaction */}
-      {showBurst && !noBurst && <ParticleBurst />}
+      {/* Clipping Container for State Layer */}
+      <div style={{ position: 'absolute', inset: 0, borderRadius: 'inherit', overflow: 'hidden', pointerEvents: 'none', zIndex: 0 }}>
+         <StateLayer 
+            color={rippleColor} 
+            isActive={isHovered || isPressed} 
+            x={coords.x} 
+            y={coords.y} 
+            width={dims.width} 
+            height={dims.height} 
+         />
+      </div>
 
-      {/* State Layer (Absolute Overlay) */}
-      <AnimatePresence>
-        {(isHovered || isPressed) && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.8 }}
-            animate={{ opacity: isPressed ? 0.2 : 0.1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.8 }}
-            transition={DS.Motion.Spring.Snappy}
-            style={{
-              position: 'absolute',
-              inset: 0,
-              background: variant === 'primary' ? '#000' : '#FFF', // Contrast layer
-              borderRadius: 'inherit',
-              pointerEvents: 'none',
-              zIndex: 0,
-              overflow: 'hidden' // Clip overlay to button shape
-            }}
-          />
-        )}
-      </AnimatePresence>
+      {/* Particles Reaction (Outside Clipping) */}
+      {showBurst && !noBurst && <ParticleBurst />}
 
       {/* Content */}
       <motion.div 

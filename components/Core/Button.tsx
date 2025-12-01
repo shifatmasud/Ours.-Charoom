@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { DS } from '../../Theme';
+import { ParticleBurst } from './ParticleBurst';
 
 interface ButtonProps {
   onClick?: () => void;
@@ -14,35 +15,6 @@ interface ButtonProps {
   type?: "button" | "submit" | "reset";
   noBurst?: boolean;
 }
-
-// Simple Particle Burst Component
-export const ParticleBurst = ({ color }: { color?: string }) => {
-  const particles = Array.from({ length: 6 });
-  return (
-    <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      {particles.map((_, i) => (
-        <motion.div
-          key={i}
-          initial={{ x: 0, y: 0, opacity: 1, scale: 1 }}
-          animate={{ 
-            x: (Math.random() - 0.5) * 60, 
-            y: (Math.random() - 0.5) * 60, 
-            opacity: 0, 
-            scale: 0 
-          }}
-          transition={{ duration: 0.5, ease: "easeOut" }}
-          style={{
-            position: 'absolute',
-            width: '4px',
-            height: '4px',
-            borderRadius: '50%',
-            background: color || DS.Color.Accent.Surface,
-          }}
-        />
-      ))}
-    </div>
-  );
-};
 
 export const Button: React.FC<ButtonProps> = ({ 
   onClick, 

@@ -1,4 +1,5 @@
 
+
 // --- Tier 2: Design System ---
 
 export const Palettes = {
@@ -103,9 +104,9 @@ export const DS = {
   Motion: {
     // 100ms Fluid Motion System
     Spring: {
-      Gentle: { type: 'spring', stiffness: 120, damping: 20, mass: 1 },
-      Snappy: { type: 'spring', stiffness: 300, damping: 30, mass: 0.8 },
-      Bouncy: { type: 'spring', stiffness: 400, damping: 15, mass: 1.2 }
+      Gentle: { type: 'spring' as const, stiffness: 120, damping: 20, mass: 1 },
+      Snappy: { type: 'spring' as const, stiffness: 300, damping: 30, mass: 0.8 },
+      Bouncy: { type: 'spring' as const, stiffness: 400, damping: 15, mass: 1.2 }
     },
     Duration: {
       Fast: 0.1,

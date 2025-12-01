@@ -71,6 +71,18 @@ export const Login: React.FC = () => {
     }
   };
 
+  // Variants to handle overflow visibility for focus ring clipping
+  // Adjusted to always keep overflow visible as requested
+  const fieldContainerVariants = {
+    hidden: { opacity: 0, height: 0, overflow: 'visible' },
+    visible: { 
+      opacity: 1, 
+      height: 'auto', 
+      overflow: 'visible'
+    },
+    exit: { opacity: 0, height: 0, overflow: 'visible' }
+  };
+
   return (
     <div style={{ 
       height: '100vh', 
@@ -142,9 +154,11 @@ export const Login: React.FC = () => {
            <AnimatePresence mode="popLayout">
              {view === 'register' && (
                <motion.div
-                 initial={{ opacity: 0, height: 0, overflow: 'hidden' }}
-                 animate={{ opacity: 1, height: 'auto' }}
-                 exit={{ opacity: 0, height: 0 }}
+                 variants={fieldContainerVariants}
+                 initial="hidden"
+                 animate="visible"
+                 exit="exit"
+                 style={{ overflow: 'visible' }}
                >
                   <Input 
                     placeholder="Full Name" 
@@ -170,10 +184,11 @@ export const Login: React.FC = () => {
            <AnimatePresence mode="popLayout">
              {view !== 'reset' && (
                 <motion.div
-                   initial={{ opacity: 0, height: 0 }}
-                   animate={{ opacity: 1, height: 'auto' }}
-                   exit={{ opacity: 0, height: 0 }}
-                   style={{ overflow: 'hidden' }}
+                   variants={fieldContainerVariants}
+                   initial="hidden"
+                   animate="visible"
+                   exit="exit"
+                   style={{ overflow: 'visible' }}
                 >
                     <Input 
                         type="password"
@@ -181,7 +196,7 @@ export const Login: React.FC = () => {
                         icon={<Key size={20} />}
                         value={password}
                         onChange={e => setPassword(e.target.value)}
-                        style={{ background: 'rgba(255,255,255,0.05)', marginBottom: '8px' }} // Added minimal margin
+                        style={{ background: 'rgba(255,255,255,0.05)', marginBottom: '8px' }}
                         required={view !== 'reset'}
                     />
                     

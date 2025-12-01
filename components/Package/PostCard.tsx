@@ -1,5 +1,4 @@
 
-
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Heart, ChatCircle, PaperPlaneTilt, PaperPlaneRight, WarningCircle, Check, Trash } from '@phosphor-icons/react';
@@ -10,6 +9,7 @@ import { Post, CurrentUser, Comment } from '../../types';
 import { api } from '../../services/supabaseClient';
 import { Link } from 'react-router-dom';
 import { DS } from '../../Theme';
+import { formatDistanceToNow } from 'date-fns';
 
 interface PostCardProps {
   post: Post;
@@ -32,6 +32,16 @@ export const PostCard: React.FC<PostCardProps> = ({ post, currentUser }) => {
   const [isDeleted, setIsDeleted] = useState(false);
 
   const canDelete = currentUser?.is_admin || currentUser?.id === post.user_id;
+
+  // Calculate relative time
+  let timeAgo = 'NOW';
+  try {
+    timeAgo = formatDistanceToNow(new Date(post.created_at), { addSuffix: true })
+        .replace(/^about /, '')
+        .replace(/^less than a minute/, 'just now');
+  } catch (e) {
+    // Fallback
+  }
 
   const handleDoubleTap = () => {
     if (!isLiked) toggleLike();
@@ -198,11 +208,12 @@ export const PostCard: React.FC<PostCardProps> = ({ post, currentUser }) => {
                  {post.caption}
               </p>
            </div>
-           <span style={{ color: DS.Color.Base.Content[3], fontSize: '11px', letterSpacing: '0.5px' }}>NOW</span>
+           <span style={{ color: DS.Color.Base.Content[3], fontSize: '11px', letterSpacing: '0.5px' }}>{timeAgo.toUpperCase()}</span>
         </div>
 
         {/* Action Bar */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '16px' }}>
+           {/* Left Group: Like, Comment, Share */}
            <div style={{ display: 'flex', gap: '8px' }}>
              <Button 
                 variant="ghost" 
@@ -224,16 +235,18 @@ export const PostCard: React.FC<PostCardProps> = ({ post, currentUser }) => {
                 <ChatCircle size={22} />
                 <SlotCounter value={comments.length || post.comments_count || 0} />
              </Button>
+
+             <Button variant="ghost" size="icon" onClick={handleShare}>
+                {isShared ? (
+                    <Check size={22} weight="bold" color={DS.Color.Accent.Surface} />
+                ) : (
+                    <PaperPlaneTilt size={22} />
+                )}
+             </Button>
            </div>
            
+           {/* Right Group: Delete */}
            <div style={{ display: 'flex', gap: '8px' }}>
-                <Button variant="ghost" size="icon" onClick={handleShare}>
-                    {isShared ? (
-                        <Check size={22} weight="bold" color={DS.Color.Accent.Surface} />
-                    ) : (
-                        <PaperPlaneTilt size={22} />
-                    )}
-                </Button>
                 {canDelete && (
                      <Button variant="ghost" size="icon" onClick={handleDeletePost} style={{ color: DS.Color.Status.Error }}>
                          <Trash size={20} />

@@ -37,6 +37,7 @@ export const GroupCall: React.FC = () => {
   // Refs for stability in callbacks
   const localStreamRef = useRef<MediaStream | null>(null);
   const peersRef = useRef<Record<string, Peer>>({});
+  const pendingCandidatesRef = useRef<Record<string, RTCIceCandidate[]>>({});
   const userRef = useRef<CurrentUser | null>(null);
   const channelRef = useRef<any>(null);
   const localVideoRef = useRef<HTMLVideoElement>(null);
@@ -87,6 +88,20 @@ export const GroupCall: React.FC = () => {
         channel.on('broadcast', { event: 'join' }, ({ payload }: any) => {
             if (payload.userId === user.id) return;
             console.log('User joined:', payload.userId);
+
+            // If we have a stale/failed connection for this user, clean it up first
+            const existing = peersRef.current[payload.userId];
+            if (existing && (existing.connection.connectionState === 'failed' || existing.connection.connectionState === 'closed')) {
+                console.log("Cleaning up stale connection for", payload.userId);
+                existing.connection.close();
+                delete peersRef.current[payload.userId];
+                setPeers(prev => {
+                    const next = { ...prev };
+                    delete next[payload.userId];
+                    return next;
+                });
+            }
+
             // If someone joins, we (existing user) initiate the connection
             createPeer(payload.userId, true);
         });
@@ -100,6 +115,17 @@ export const GroupCall: React.FC = () => {
                 const peer = createPeer(from, false);
                 try {
                     await peer.connection.setRemoteDescription(new RTCSessionDescription(data));
+                    
+                    // Process any queued candidates that arrived before the offer
+                    const pending = pendingCandidatesRef.current[from];
+                    if (pending && pending.length > 0) {
+                        console.log(`Processing ${pending.length} queued candidates for ${from}`);
+                        for (const candidate of pending) {
+                            await peer.connection.addIceCandidate(candidate).catch(e => console.warn("Failed to add queued candidate", e));
+                        }
+                        delete pendingCandidatesRef.current[from];
+                    }
+
                     const answer = await peer.connection.createAnswer();
                     await peer.connection.setLocalDescription(answer);
                     
@@ -114,14 +140,29 @@ export const GroupCall: React.FC = () => {
                 if (peer) {
                     try {
                         await peer.connection.setRemoteDescription(new RTCSessionDescription(data));
+                        // Also process pending candidates here just in case
+                        const pending = pendingCandidatesRef.current[from];
+                        if (pending && pending.length > 0) {
+                            for (const candidate of pending) {
+                                await peer.connection.addIceCandidate(candidate).catch(e => console.warn(e));
+                            }
+                            delete pendingCandidatesRef.current[from];
+                        }
                     } catch(e) { console.error("Answer error", e); }
                 }
             } else if (type === 'candidate') {
+                const candidate = new RTCIceCandidate(data);
                 const peer = peersRef.current[from];
-                if (peer) {
+                
+                if (peer && peer.connection.remoteDescription) {
                     try {
-                        await peer.connection.addIceCandidate(new RTCIceCandidate(data));
+                        await peer.connection.addIceCandidate(candidate);
                     } catch (e) { console.error('Error adding candidate', e); }
+                } else {
+                    // Queue candidate if peer doesn't exist or isn't ready
+                    console.log(`Queuing candidate for ${from}`);
+                    if (!pendingCandidatesRef.current[from]) pendingCandidatesRef.current[from] = [];
+                    pendingCandidatesRef.current[from].push(candidate);
                 }
             }
         });
@@ -157,6 +198,7 @@ export const GroupCall: React.FC = () => {
   const createPeer = (targetId: string, initiator: boolean) => {
      if (peersRef.current[targetId]) return peersRef.current[targetId];
 
+     console.log(`Creating peer for ${targetId} (initiator: ${initiator})`);
      const pc = new RTCPeerConnection(ICE_SERVERS);
      
      // Add local tracks
@@ -168,8 +210,8 @@ export const GroupCall: React.FC = () => {
 
      // Handle remote tracks
      pc.ontrack = (event) => {
+         console.log(`Track received from ${targetId}`, event.streams[0]);
          const stream = event.streams[0];
-         // Check if video
          const hasVideo = stream.getVideoTracks().length > 0;
          
          setPeers(prev => ({
@@ -181,7 +223,9 @@ export const GroupCall: React.FC = () => {
      // Handle Renegotiation
      pc.onnegotiationneeded = async () => {
         try {
+            // Simple check to avoid glare if we are not the polite peer or if state is weird
             if (pc.signalingState !== 'stable') return;
+            
             const offer = await pc.createOffer();
             await pc.setLocalDescription(offer);
             channelRef.current?.send({
@@ -218,6 +262,12 @@ export const GroupCall: React.FC = () => {
      peersRef.current[targetId] = newPeer;
      setPeers(prev => ({ ...prev, [targetId]: newPeer }));
 
+     // Dump any global queued candidates for this peer (if they arrived really early)
+     // Note: They will likely fail to add here if remoteDesc is not set, 
+     // but the signal handler loop handles the 'offer' arrival case.
+     // This block is mostly useful if we are the initiator and somehow got candidates back super fast? 
+     // Unlikely for initiator.
+     
      // Initiator Logic
      if (initiator) {
          (async () => {
@@ -256,7 +306,7 @@ export const GroupCall: React.FC = () => {
               localStreamRef.current?.removeTrack(t);
           });
           
-          // Remove from peers using removeTrack to trigger negotiation
+          // Remove from peers
           Object.values(peersRef.current).forEach((peer: Peer) => {
               const senders = peer.connection.getSenders();
               const videoSender = senders.find(s => s.track?.kind === 'video');
@@ -267,7 +317,7 @@ export const GroupCall: React.FC = () => {
 
           if (localVideoRef.current) localVideoRef.current.srcObject = null;
           setIsVideoEnabled(false);
-          setIsScreenSharing(false); // Implicitly stop screen share if disabling video
+          setIsScreenSharing(false);
       } else {
           // Start Video
           try {
@@ -287,7 +337,6 @@ export const GroupCall: React.FC = () => {
                       localVideoRef.current.play();
                   }
                   setIsVideoEnabled(true);
-                  // Ensure screen sharing is off if we enable camera
                   setIsScreenSharing(false);
               }
           } catch(e) { 
@@ -299,9 +348,6 @@ export const GroupCall: React.FC = () => {
 
   const toggleScreenShare = async () => {
       if (isScreenSharing) {
-          // Stop screen share -> revert to Camera if enabled, or stop video
-          // Simplification: Toggle off screen share stops video track.
-          // If they want camera back, they click video button.
           localStreamRef.current?.getVideoTracks().forEach(t => { t.stop(); localStreamRef.current?.removeTrack(t); });
           Object.values(peersRef.current).forEach((peer: Peer) => {
             const senders = peer.connection.getSenders();
@@ -318,7 +364,6 @@ export const GroupCall: React.FC = () => {
               const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
               const screenTrack = screenStream.getVideoTracks()[0];
               
-              // Handle track end (user clicks Stop Sharing in browser UI)
               screenTrack.onended = () => {
                   setIsScreenSharing(false);
                   setIsVideoEnabled(false);
@@ -331,7 +376,6 @@ export const GroupCall: React.FC = () => {
                   });
               };
 
-              // If there was already a video track, stop it and replace
               const existingVideoTrack = localStreamRef.current?.getVideoTracks()[0];
               if (existingVideoTrack) {
                   existingVideoTrack.stop();
@@ -340,7 +384,6 @@ export const GroupCall: React.FC = () => {
 
               localStreamRef.current?.addTrack(screenTrack);
               
-              // Update Peers
               Object.values(peersRef.current).forEach((peer: Peer) => {
                   const senders = peer.connection.getSenders();
                   const videoSender = senders.find(s => s.track?.kind === 'video');
@@ -357,7 +400,7 @@ export const GroupCall: React.FC = () => {
               }
               
               setIsScreenSharing(true);
-              setIsVideoEnabled(true); // Screen share counts as video enabled for UI state generally
+              setIsVideoEnabled(true);
 
           } catch (e) { console.error("Screen share failed", e); }
       }
@@ -449,9 +492,11 @@ const RemotePeer: React.FC<{ peer: Peer }> = ({ peer }) => {
             
             // Check tracks
             const checkVideo = () => {
-               setHasVideo(peer.stream?.getVideoTracks().some(t => t.readyState === 'live' && t.enabled) || false);
+               const videoTracks = peer.stream?.getVideoTracks() || [];
+               setHasVideo(videoTracks.some(t => t.readyState === 'live' && t.enabled));
             };
             checkVideo();
+            
             peer.stream.addEventListener('addtrack', checkVideo);
             peer.stream.addEventListener('removetrack', checkVideo);
             return () => {

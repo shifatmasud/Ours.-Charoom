@@ -1,7 +1,8 @@
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Heart, ChatCircle, PaperPlaneTilt, PaperPlaneRight, WarningCircle, Check, Trash } from '@phosphor-icons/react';
+import { Heart, ChatCircle, PaperPlaneTilt, PaperPlaneRight, WarningCircle, Check, Trash, X } from '@phosphor-icons/react';
 import { Avatar } from '../Core/Avatar';
 import { Button, ParticleBurst } from '../Core/Button';
 import { SlotCounter } from '../Core/SlotCounter';
@@ -30,6 +31,10 @@ export const PostCard: React.FC<PostCardProps> = ({ post, currentUser }) => {
   const [imageError, setImageError] = useState(false);
   const [isShared, setIsShared] = useState(false);
   const [isDeleted, setIsDeleted] = useState(false);
+  
+  // Lightbox State
+  const [isLightboxOpen, setIsLightboxOpen] = useState(false);
+  const clickTimeoutRef = useRef<number | null>(null);
 
   const canDelete = currentUser?.is_admin || currentUser?.id === post.user_id;
 
@@ -47,6 +52,23 @@ export const PostCard: React.FC<PostCardProps> = ({ post, currentUser }) => {
     if (!isLiked) toggleLike();
     setShowHeartOverlay(true);
     setTimeout(() => setShowHeartOverlay(false), 800);
+  };
+
+  const handleImageClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    
+    if (clickTimeoutRef.current) {
+        // Double click detected
+        clearTimeout(clickTimeoutRef.current);
+        clickTimeoutRef.current = null;
+        handleDoubleTap();
+    } else {
+        // Potential single click
+        clickTimeoutRef.current = window.setTimeout(() => {
+            setIsLightboxOpen(true);
+            clickTimeoutRef.current = null;
+        }, 250);
+    }
   };
 
   const toggleLike = async () => {
@@ -116,6 +138,7 @@ export const PostCard: React.FC<PostCardProps> = ({ post, currentUser }) => {
         setIsDeleted(true);
     } catch (e) {
         console.error("Failed to delete post", e);
+        alert("Failed to delete post. Please try again.");
     }
   };
 
@@ -126,6 +149,7 @@ export const PostCard: React.FC<PostCardProps> = ({ post, currentUser }) => {
         setComments(prev => prev.filter(c => c.id !== commentId));
     } catch (e) {
         console.error("Failed to delete comment", e);
+        alert("Failed to delete comment.");
     }
   };
 
@@ -154,7 +178,7 @@ export const PostCard: React.FC<PostCardProps> = ({ post, currentUser }) => {
           alignItems: 'center',
           justifyContent: 'center'
         }}
-        onDoubleClick={handleDoubleTap}
+        onClick={handleImageClick}
         whileHover={{ scale: 1.005 }}
         transition={DS.Motion.Spring.Gentle}
       >
@@ -307,6 +331,52 @@ export const PostCard: React.FC<PostCardProps> = ({ post, currentUser }) => {
         )}
         </AnimatePresence>
       </div>
+
+      {/* Lightbox Portal */}
+      {createPortal(
+        <AnimatePresence>
+            {isLightboxOpen && (
+                <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.2 }}
+                    onClick={() => setIsLightboxOpen(false)}
+                    style={{
+                        position: 'fixed', inset: 0, zIndex: 9999,
+                        background: 'rgba(0,0,0,0.96)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        backdropFilter: 'blur(10px)',
+                        cursor: 'zoom-out'
+                    }}
+                >
+                    <button 
+                        onClick={() => setIsLightboxOpen(false)}
+                        style={{
+                            position: 'absolute', top: 24, right: 24,
+                            background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: '50%',
+                            width: 48, height: 48, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            color: 'white', cursor: 'pointer', zIndex: 10,
+                            backdropFilter: 'blur(4px)'
+                        }}
+                    >
+                        <X size={24} weight="bold" />
+                    </button>
+                    <motion.img 
+                        initial={{ scale: 0.85, opacity: 0, y: 20 }}
+                        animate={{ scale: 1, opacity: 1, y: 0 }}
+                        exit={{ scale: 0.85, opacity: 0, y: 20 }}
+                        transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+                        src={post.image_url} 
+                        alt="Full size"
+                        style={{ maxWidth: '100vw', maxHeight: '100vh', objectFit: 'contain' }}
+                        onClick={(e) => e.stopPropagation()} 
+                    />
+                </motion.div>
+            )}
+        </AnimatePresence>,
+        document.body
+      )}
     </motion.article>
   );
 };

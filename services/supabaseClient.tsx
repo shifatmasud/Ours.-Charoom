@@ -328,8 +328,11 @@ export const api = {
             .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     }
     
-    // For regular users, also filter out locally deleted items (essential for "Mock" fallback items or partial connection states)
-    const resultPosts = realPosts.length > 0 ? realPosts : MOCK_POSTS;
+    // For regular users, respect server state mostly.
+    // data ? realPosts means: if server call succeeded (data is not null), use realPosts (even if empty).
+    // This prevents falling back to MOCK if I have 0 posts.
+    // MOCK_POSTS only used if data is null (connection error).
+    const resultPosts = data ? realPosts : MOCK_POSTS;
     return resultPosts.filter(p => !DELETED_POST_IDS.has(p.id));
   },
 
@@ -453,25 +456,37 @@ export const api = {
   },
 
   deletePost: async (postId: string): Promise<void> => {
-    // ALWAYS track deletion locally immediately.
-    // This solves the issue where deleted items (especially mock items) reappear after refresh.
-    DELETED_POST_IDS.add(postId);
-    saveSet(KEYS.DELETED_POSTS, DELETED_POST_IDS);
-
+    // Guest Mode
     if (isGuestMode()) {
         MOCK_POSTS = MOCK_POSTS.filter(p => p.id !== postId);
+        DELETED_POST_IDS.add(postId);
+        saveSet(KEYS.DELETED_POSTS, DELETED_POST_IDS);
         return;
     }
     
-    // Attempt real server deletion
-    try {
-        const { error } = await supabase.from('posts').delete().eq('id', postId);
-        if (error) {
-            console.warn("Server delete failed (possibly due to RLS or Mock ID), but hidden locally.", error);
-        }
-    } catch (e) {
-        console.warn("Server delete exception, kept hidden locally.", e);
+    // 1. Fetch info for storage cleanup
+    const { data: post } = await supabase.from('posts').select('image_url').eq('id', postId).single();
+    
+    // 2. Permanent Delete
+    const { error } = await supabase.from('posts').delete().eq('id', postId);
+    if (error) {
+        console.error("Delete failed:", error);
+        throw error;
     }
+    
+    // 3. Storage Cleanup
+    if (post?.image_url) {
+        const urlParts = post.image_url.split('/images/');
+        if (urlParts.length > 1) {
+             await supabase.storage.from('images').remove([urlParts[1]]);
+        }
+    }
+
+    // 4. Local Optimistic Update
+    // We add to deleted set to ensure UI consistency immediately without refetch,
+    // though the item is permanently gone from DB.
+    DELETED_POST_IDS.add(postId);
+    saveSet(KEYS.DELETED_POSTS, DELETED_POST_IDS);
   },
 
   likePost: async (postId: string, userId: string, ownerId: string): Promise<void> => {
@@ -511,7 +526,9 @@ export const api = {
                   .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
     }
 
-    return comments.length > 0 ? comments : MOCK_COMMENTS.filter(c => c.post_id === postId);
+    // For real users, we use server data. Only use mock fallback if server data is empty AND we suspect mock items should exist.
+    // Here we prioritize server data if available.
+    return comments.length > 0 ? comments.filter(c => !DELETED_COMMENT_IDS.has(c.id)) : MOCK_COMMENTS.filter(c => c.post_id === postId);
   },
 
   addComment: async (postId: string, userId: string, content: string): Promise<Comment> => {
@@ -546,8 +563,14 @@ export const api = {
         saveSet(KEYS.DELETED_COMMENTS, DELETED_COMMENT_IDS);
         return;
     }
+
+    // Server delete first
     const { error } = await supabase.from('comments').delete().eq('id', commentId);
     if (error) throw error;
+
+    // Local tracking after success
+    DELETED_COMMENT_IDS.add(commentId);
+    saveSet(KEYS.DELETED_COMMENTS, DELETED_COMMENT_IDS);
   },
 
   // --- Interactions ---
@@ -564,25 +587,51 @@ export const api = {
   // --- Messaging ---
   getMessages: async (friendId: string): Promise<Message[]> => {
     if (friendId === 'codex') {
-        // Return global/group messages
-        // Prioritize persistent MOCK messages if they exist (for Guest or Hybrid)
-        if (isGuestMode()) return MOCK_MESSAGES.filter(m => m.receiver_id === 'codex');
-        
-        // Even for real users, we might want to check DB but fallback to mock if DB is empty to show something
-        const { data, error } = await supabase
+        // 1. Fetch Real Global Data (Always try, even for guests)
+        const { data } = await supabase
             .from('messages')
             .select('*')
             .eq('receiver_id', 'codex')
             .order('created_at', { ascending: true });
-            
-        if (error || !data || data.length === 0) {
-             return MOCK_MESSAGES.filter(m => m.receiver_id === 'codex');
-        }
-        return data || [];
+        
+        const realMessages = data || [];
+        
+        // 2. Get Local/Mock Data (for optimistic updates or guest isolation)
+        const localMessages = MOCK_MESSAGES.filter(m => m.receiver_id === 'codex');
+
+        // 3. Merge Strategies
+        // We use a Map to deduplicate based on ID. 
+        // If IDs collide, we generally trust the one from DB (realMessages) but practically they are the same object structure.
+        const messageMap = new Map<string, Message>();
+        
+        // Populate with real messages first
+        realMessages.forEach(m => messageMap.set(m.id, m));
+        
+        // Add local messages if they aren't already in the list
+        // Note: When syncing to DB, if the ID was generated locally and sent, it might match. 
+        // If DB generated a new UUID, we might have duplicates. 
+        // To fix visual duplicates for the *sender*: we filter out local messages that match the content/sender of a recent real message.
+        // But for simplicity in this "void" theme, we just overlay them.
+        localMessages.forEach(m => {
+            if (!messageMap.has(m.id)) {
+                // Heuristic: check if we have a duplicate by content/timestamp to avoid "double echo"
+                const duplicate = realMessages.find(rm => 
+                    rm.sender_id === m.sender_id && 
+                    rm.content === m.content && 
+                    Math.abs(new Date(rm.created_at).getTime() - new Date(m.created_at).getTime()) < 5000
+                );
+                if (!duplicate) {
+                    messageMap.set(m.id, m);
+                }
+            }
+        });
+
+        const merged = Array.from(messageMap.values());
+        return merged.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
     }
 
     if (isGuestMode()) {
-        // Return messages exchanged between Guest and Friend
+        // Return messages exchanged between Guest and Friend (Local Only)
         return MOCK_MESSAGES.filter(m => 
             (m.sender_id === MOCK_USER.id && m.receiver_id === friendId) || 
             (m.sender_id === friendId && m.receiver_id === MOCK_USER.id)
@@ -604,7 +653,7 @@ export const api = {
 
   getLastMessage: async (friendId: string): Promise<Message | null> => {
     if (friendId === 'codex') {
-        // Last message from codex
+        // Last message from codex (Check DB first)
         const { data } = await supabase.from('messages').select('*').eq('receiver_id', 'codex').order('created_at', { ascending: false }).limit(1);
         const dbMsg = data?.[0];
         const mockMsg = MOCK_MESSAGES.filter(m => m.receiver_id === 'codex').pop();
@@ -648,16 +697,37 @@ export const api = {
         created_at: new Date().toISOString()
     };
 
-    if (isGuestMode() || receiverId === 'codex') {
+    // Codex: Always Sync + Optimistic Local
+    if (receiverId === 'codex') {
+        // 1. Try Saving to DB
+        const { error } = await supabase.from('messages').insert({ 
+            sender_id: senderId, 
+            receiver_id: receiverId, 
+            content, 
+            type, 
+            media_url: mediaUrl 
+        });
+
+        // 2. Local Fallback/Optimistic Update
+        // If guest, always save locally. If real user, only if DB failed (to avoid duplicate echo on next fetch, 
+        // since getMessages handles the merge carefully now, we can save it safely if we want offline support).
+        // For Codex, guests MUST rely on local mock if the DB insert fails due to permissions (e.g. strict FKs).
+        if (isGuestMode() || error) {
+             MOCK_MESSAGES.push(newMessage);
+             saveMockMessages();
+        }
+        
+        // Note: For real users, successful DB insert implies it will show up in the subscription or next fetch.
+        // We don't push to MOCK_MESSAGES for real users on success to keep MOCK clean.
+        return;
+    }
+
+    if (isGuestMode()) {
         const mockMsg = { ...newMessage };
         MOCK_MESSAGES.push(mockMsg);
         saveMockMessages(); // Persist to storage
 
-        if (receiverId !== 'codex' && !isGuestMode()) {
-            // If not codex and real user, also save to DB
-        }
-        
-        if (receiverId !== 'codex' && isGuestMode()) {
+        if (receiverId !== 'codex') {
             // Auto reply for guest
              setTimeout(() => {
                 const replies = [
@@ -680,12 +750,6 @@ export const api = {
                 MOCK_MESSAGES.push(replyMsg);
                 saveMockMessages();
             }, 2000);
-        }
-        
-        // Try saving to Supabase for Codex if possible (Real users)
-        if (receiverId === 'codex' && !isGuestMode()) {
-             // We also save to local mock just in case DB fails or isn't subscribed efficiently for immediate feedback
-             await supabase.from('messages').insert({ sender_id: senderId, receiver_id: receiverId, content, type, media_url: mediaUrl });
         }
         
         return;

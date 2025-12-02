@@ -1,14 +1,12 @@
 
-
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../../services/supabaseClient';
 import { Profile, Message } from '../../types';
-import { MagnifyingGlass, GlobeHemisphereWest } from '@phosphor-icons/react';
+import { MagnifyingGlass } from '@phosphor-icons/react';
 import { Avatar } from '../Core/Avatar';
 import { theme, commonStyles } from '../../Theme';
 import { motion } from 'framer-motion';
-import { DS } from '../../Theme';
 
 interface ProfileWithMeta extends Profile {
   lastMessage?: Message | null;
@@ -24,6 +22,7 @@ export const MessagesList: React.FC = () => {
       try {
         const currentUser = await api.getCurrentUser();
         const data = await api.getAllProfiles();
+        // Filter out current user
         const others = data.filter(p => p.id !== currentUser.id);
 
         // Fetch last message for each user to sort and display preview
@@ -113,32 +112,6 @@ export const MessagesList: React.FC = () => {
           </div>
         </div>
 
-        {/* Codex Group Entry */}
-        <motion.div variants={itemVariants} initial="hidden" animate="show">
-            <Link to="/messages/codex" style={{ textDecoration: 'none' }}>
-                <div style={{ 
-                    display: 'flex', alignItems: 'center', gap: '20px', 
-                    background: `linear-gradient(90deg, ${DS.Color.Base.Surface[2]}, ${DS.Color.Base.Surface[1]})`, 
-                    padding: '16px', borderRadius: DS.Radius.L, marginBottom: '24px',
-                    border: `1px solid ${DS.Color.Accent.Surface}40`
-                }}>
-                    <div style={{ 
-                        width: '48px', height: '48px', borderRadius: '50%', 
-                        background: DS.Color.Accent.Surface, 
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        color: 'white'
-                    }}>
-                        <GlobeHemisphereWest size={28} weight="duotone" />
-                    </div>
-                    <div style={{ flex: 1 }}>
-                        <h4 style={{ fontWeight: 600, fontSize: '16px', color: theme.colors.text1, margin: 0 }}>CODEX</h4>
-                        <p style={{ fontSize: '13px', color: theme.colors.text2, margin: 0 }}>Global Group Chat</p>
-                    </div>
-                    <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#22c55e' }}></div>
-                </div>
-            </Link>
-        </motion.div>
-
         {/* Messages List */}
         <motion.div 
           variants={listVariants}
@@ -210,6 +183,10 @@ export const MessagesList: React.FC = () => {
                 </Link>
               );
             })
+          )}
+          
+          {!loading && filteredProfiles.length === 0 && (
+             <div style={{ color: theme.colors.text3, textAlign: 'center', marginTop: '40px' }}>No users found.</div>
           )}
         </motion.div>
       </div>

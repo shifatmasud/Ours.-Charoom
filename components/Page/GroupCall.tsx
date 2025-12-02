@@ -1,19 +1,16 @@
 
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Microphone, MicrophoneSlash, PhoneDisconnect, Users, VideoCamera, VideoCameraSlash, Screencast, DesktopTower, ArrowsOut } from '@phosphor-icons/react';
+import { Microphone, MicrophoneSlash, PhoneDisconnect, VideoCamera, VideoCameraSlash, DesktopTower, Screencast, Users, ArrowsOut } from '@phosphor-icons/react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { theme, commonStyles, DS } from '../../Theme';
+import { theme, commonStyles } from '../../Theme';
 import { api, supabase } from '../../services/supabaseClient';
 import { CurrentUser } from '../../types';
 
-// --- types ---
 interface Peer {
   id: string;
   connection: RTCPeerConnection;
   stream?: MediaStream;
-  username?: string;
-  isVideoEnabled?: boolean;
 }
 
 const ICE_SERVERS = {
@@ -30,335 +27,283 @@ export const GroupCall: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [peers, setPeers] = useState<Record<string, Peer>>({});
   const [isMuted, setIsMuted] = useState(false);
-  const [isVideoEnabled, setIsVideoEnabled] = useState(false);
+  const [isVideoEnabled, setIsVideoEnabled] = useState(false); 
   const [isScreenSharing, setIsScreenSharing] = useState(false);
-  const [status, setStatus] = useState('Initializing void...');
+  const [status, setStatus] = useState('Initializing...');
   const [fullScreenPeerId, setFullScreenPeerId] = useState<string | null>(null);
 
-  // Refs for stability in callbacks
+  // Refs
   const localStreamRef = useRef<MediaStream | null>(null);
   const peersRef = useRef<Record<string, Peer>>({});
   const userRef = useRef<CurrentUser | null>(null);
   const channelRef = useRef<any>(null);
   const localVideoRef = useRef<HTMLVideoElement>(null);
 
-  // --- Cleanup ---
-  const leaveCall = () => {
-    // Stop tracks
-    if (localStreamRef.current) {
-        localStreamRef.current.getTracks().forEach(t => t.stop());
-    }
-    
-    // Close connections
-    Object.values(peersRef.current).forEach((p: Peer) => p.connection.close());
-    
-    // Leave channel
-    if (channelRef.current) supabase?.removeChannel(channelRef.current);
-    
-    navigate(-1);
-  };
-
   useEffect(() => {
+    let mounted = true;
+
     const init = async () => {
       try {
         const user = await api.getCurrentUser();
+        if(!mounted) return;
         setCurrentUser(user);
         userRef.current = user;
 
-        // 1. Get Audio (Initial)
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        // 1. Get User Media
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+        
+        // Mute video initially (soft mute)
+        stream.getVideoTracks().forEach(t => t.enabled = false);
+        
         localStreamRef.current = stream;
-        setStatus('Listening for signals...');
-
-        if (!supabase) {
-            setStatus('Error: Signaling server (Supabase) not configured.');
-            return;
+        if (localVideoRef.current) {
+             localVideoRef.current.srcObject = stream;
+             localVideoRef.current.muted = true;
         }
 
-        // 2. Join Signaling Channel
+        setStatus('Connected.');
+
+        // 2. Signaling
         const channel = supabase.channel(`call:${roomId}`, {
-          config: {
-            broadcast: { self: true } 
-          }
+          config: { broadcast: { self: true } }
         });
         channelRef.current = channel;
 
-        // --- Signaling Event Handlers ---
-
+        // JOIN: When someone joins, we initiate the call to them
         channel.on('broadcast', { event: 'join' }, ({ payload }: any) => {
-            if (payload.userId === user.id) return;
-            // If someone joins, we (existing user) initiate the connection
-            createPeer(payload.userId, true);
+            if (payload.userId !== user.id) {
+                console.log(`User ${payload.userId} joined, initiating...`);
+                createPeer(payload.userId, true);
+            }
         });
 
+        // SIGNAL: Exchange offers, answers, candidates
         channel.on('broadcast', { event: 'signal' }, async ({ payload }: any) => {
-            if (payload.to !== user.id) return; // Not for me
-            
+            if (payload.to !== user.id) return;
+
             const { from, type, data } = payload;
-            
-            if (type === 'offer') {
-                const peer = createPeer(from, false);
-                try {
-                    await peer.connection.setRemoteDescription(new RTCSessionDescription(data));
+            let peer = peersRef.current[from];
+
+            if (!peer) {
+                // If we receive an offer from someone we don't know yet, create peer (passive)
+                peer = createPeer(from, false);
+            }
+
+            try {
+                if (type === 'offer') {
+                    // Collision handling: strict initiator check is managed by logic above, 
+                    // but we ensure we are in stable state or roll back.
+                    if (peer.connection.signalingState !== 'stable') {
+                        await Promise.all([
+                            peer.connection.setLocalDescription({ type: 'rollback' }),
+                            peer.connection.setRemoteDescription(new RTCSessionDescription(data))
+                        ]);
+                    } else {
+                        await peer.connection.setRemoteDescription(new RTCSessionDescription(data));
+                    }
+                    
                     const answer = await peer.connection.createAnswer();
                     await peer.connection.setLocalDescription(answer);
-                    
                     channel.send({
                         type: 'broadcast',
                         event: 'signal',
                         payload: { to: from, from: user.id, type: 'answer', data: answer }
                     });
-                } catch(e) { console.error("Offer error", e); }
-            } else if (type === 'answer') {
-                const peer = peersRef.current[from];
-                if (peer) {
-                    try {
-                        await peer.connection.setRemoteDescription(new RTCSessionDescription(data));
-                    } catch(e) { console.error("Answer error", e); }
-                }
-            } else if (type === 'candidate') {
-                const peer = peersRef.current[from];
-                if (peer) {
+                } else if (type === 'answer') {
+                    if (peer.connection.signalingState === 'have-local-offer') {
+                         await peer.connection.setRemoteDescription(new RTCSessionDescription(data));
+                    }
+                } else if (type === 'candidate') {
                     try {
                         await peer.connection.addIceCandidate(new RTCIceCandidate(data));
-                    } catch (e) { console.error('Error adding candidate', e); }
+                    } catch (e) {
+                        console.error("Error adding ice candidate", e);
+                    }
                 }
+            } catch (e) {
+                console.error("Signaling error", e);
             }
         });
 
-        channel.subscribe(async (status: string) => {
+        channel.subscribe((status: string) => {
             if (status === 'SUBSCRIBED') {
-               setStatus('Connected to void.');
-               // Announce presence
-               channel.send({
-                   type: 'broadcast',
-                   event: 'join',
-                   payload: { userId: user.id }
-               });
+                // Announce existence so others can connect to me
+                channel.send({
+                    type: 'broadcast',
+                    event: 'join',
+                    payload: { userId: user.id }
+                });
             }
         });
 
       } catch (e) {
         console.error(e);
-        setStatus('Microphone access denied or error.');
+        setStatus('Media access denied or connection failed.');
       }
     };
 
     init();
 
     return () => {
-      // Cleanup handled by leaveCall logic if navigation happens, but extra safety:
-      if (channelRef.current) supabase?.removeChannel(channelRef.current);
+        mounted = false;
+        leaveCall();
     };
   }, [roomId]);
 
-  // --- WebRTC Logic ---
-
   const createPeer = (targetId: string, initiator: boolean) => {
-     if (peersRef.current[targetId]) return peersRef.current[targetId];
+      // Prevent duplicate peer creation
+      if (peersRef.current[targetId]) return peersRef.current[targetId];
 
-     const pc = new RTCPeerConnection(ICE_SERVERS);
-     
-     // Add local tracks
-     if (localStreamRef.current) {
-        localStreamRef.current.getTracks().forEach(track => {
-            pc.addTrack(track, localStreamRef.current!);
-        });
-     }
+      const pc = new RTCPeerConnection(ICE_SERVERS);
+      
+      // Add local tracks
+      if (localStreamRef.current) {
+          localStreamRef.current.getTracks().forEach(track => {
+              pc.addTrack(track, localStreamRef.current!);
+          });
+      }
 
-     // Handle remote tracks
-     pc.ontrack = (event) => {
-         const stream = event.streams[0];
-         // Check if video
-         const hasVideo = stream.getVideoTracks().length > 0;
-         
-         setPeers(prev => ({
-             ...prev,
-             [targetId]: { ...prev[targetId], stream, isVideoEnabled: hasVideo }
-         }));
-     };
+      // Handle Remote Stream
+      pc.ontrack = (event) => {
+          console.log(`Received track from ${targetId}`, event.streams[0]);
+          setPeers(prev => ({
+              ...prev,
+              [targetId]: { ...prev[targetId], id: targetId, connection: pc, stream: event.streams[0] }
+          }));
+      };
 
-     // Handle Renegotiation
-     pc.onnegotiationneeded = async () => {
-        try {
-            if (pc.signalingState !== 'stable') return;
-            const offer = await pc.createOffer();
-            await pc.setLocalDescription(offer);
-            channelRef.current?.send({
-                 type: 'broadcast',
-                 event: 'signal',
-                 payload: { 
-                     to: targetId, 
-                     from: userRef.current?.id, 
-                     type: 'offer', 
-                     data: offer 
-                 }
-             });
-        } catch(e) { console.error("Renegotiation failed", e); }
-     };
+      // Connection State Monitoring
+      pc.oniceconnectionstatechange = () => {
+          if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
+              console.log(`ICE ${pc.iceConnectionState}, attempting restart...`);
+              if (initiator) {
+                  pc.restartIce();
+              }
+          }
+      };
 
-     // ICE Candidates
-     pc.onicecandidate = (event) => {
-         if (event.candidate && channelRef.current) {
-             channelRef.current.send({
-                 type: 'broadcast',
-                 event: 'signal',
-                 payload: { 
-                     to: targetId, 
-                     from: userRef.current?.id, 
-                     type: 'candidate', 
-                     data: event.candidate 
-                 }
-             });
-         }
-     };
+      // ICE Candidates
+      pc.onicecandidate = (event) => {
+          if (event.candidate && channelRef.current) {
+              channelRef.current.send({
+                  type: 'broadcast',
+                  event: 'signal',
+                  payload: { to: targetId, from: userRef.current?.id, type: 'candidate', data: event.candidate }
+              });
+          }
+      };
 
-     // Create Peer Object
-     const newPeer: Peer = { id: targetId, connection: pc };
-     peersRef.current[targetId] = newPeer;
-     setPeers(prev => ({ ...prev, [targetId]: newPeer }));
+      const peer = { id: targetId, connection: pc };
+      peersRef.current[targetId] = peer;
+      setPeers(prev => ({ ...prev, [targetId]: peer }));
 
-     // Initiator Logic
-     if (initiator) {
-         (async () => {
-             const offer = await pc.createOffer();
-             await pc.setLocalDescription(offer);
-             channelRef.current?.send({
-                 type: 'broadcast',
-                 event: 'signal',
-                 payload: { 
-                     to: targetId, 
-                     from: userRef.current?.id, 
-                     type: 'offer', 
-                     data: offer 
-                 }
-             });
-         })();
-     }
+      if (initiator) {
+          const makeOffer = async () => {
+              try {
+                  const offer = await pc.createOffer();
+                  await pc.setLocalDescription(offer);
+                  channelRef.current?.send({
+                      type: 'broadcast',
+                      event: 'signal',
+                      payload: { to: targetId, from: userRef.current?.id, type: 'offer', data: offer }
+                  });
+              } catch(e) { console.error("Offer creation failed", e); }
+          };
+          makeOffer();
+      }
 
-     return newPeer;
+      return peer;
   };
 
-  const toggleMute = () => {
+  const leaveCall = () => {
       if (localStreamRef.current) {
-          localStreamRef.current.getAudioTracks().forEach(track => {
-              track.enabled = !track.enabled;
-          });
-          setIsMuted(!isMuted);
+          localStreamRef.current.getTracks().forEach(t => t.stop());
+      }
+      Object.values(peersRef.current).forEach((p: Peer) => p.connection.close());
+      peersRef.current = {};
+      
+      if (channelRef.current) {
+          supabase.removeChannel(channelRef.current);
+          channelRef.current = null;
       }
   };
 
-  const toggleVideo = async () => {
-      if (isVideoEnabled) {
-          // Stop video
-          localStreamRef.current?.getVideoTracks().forEach(t => {
-              t.stop();
-              localStreamRef.current?.removeTrack(t);
-          });
-          
-          // Remove from peers using removeTrack to trigger negotiation
-          Object.values(peersRef.current).forEach((peer: Peer) => {
-              const senders = peer.connection.getSenders();
-              const videoSender = senders.find(s => s.track?.kind === 'video');
-              if (videoSender) {
-                  peer.connection.removeTrack(videoSender);
-              }
-          });
+  // --- Controls ---
 
-          if (localVideoRef.current) localVideoRef.current.srcObject = null;
-          setIsVideoEnabled(false);
-          setIsScreenSharing(false); // Implicitly stop screen share if disabling video
-      } else {
-          // Start Video
-          try {
-              const videoStream = await navigator.mediaDevices.getUserMedia({ video: true });
-              const videoTrack = videoStream.getVideoTracks()[0];
-              
-              if (localStreamRef.current) {
-                  localStreamRef.current.addTrack(videoTrack);
-                  
-                  // Add to all peers
-                  Object.values(peersRef.current).forEach((peer: Peer) => {
-                      peer.connection.addTrack(videoTrack, localStreamRef.current!);
-                  });
-                  
-                  if (localVideoRef.current) {
-                      localVideoRef.current.srcObject = new MediaStream([videoTrack]);
-                      localVideoRef.current.play();
-                  }
-                  setIsVideoEnabled(true);
-                  // Ensure screen sharing is off if we enable camera
-                  setIsScreenSharing(false);
+  const toggleMute = () => {
+      if (localStreamRef.current) {
+          const audioTrack = localStreamRef.current.getAudioTracks()[0];
+          if (audioTrack) {
+              audioTrack.enabled = !audioTrack.enabled;
+              setIsMuted(!audioTrack.enabled);
+          }
+      }
+  };
+
+  const toggleVideo = () => {
+      if (localStreamRef.current) {
+          const videoTrack = localStreamRef.current.getVideoTracks()[0];
+          if (videoTrack) {
+              videoTrack.enabled = !videoTrack.enabled;
+              setIsVideoEnabled(videoTrack.enabled);
+              if (isScreenSharing && videoTrack.enabled) {
+                   setIsScreenSharing(false);
               }
-          } catch(e) { 
-              console.error("Failed to start video", e); 
-              alert("Could not access camera");
           }
       }
   };
 
   const toggleScreenShare = async () => {
-      if (isScreenSharing) {
-          // Stop screen share -> revert to Camera if enabled, or stop video
-          localStreamRef.current?.getVideoTracks().forEach(t => { t.stop(); localStreamRef.current?.removeTrack(t); });
-          Object.values(peersRef.current).forEach((peer: Peer) => {
-            const senders = peer.connection.getSenders();
-            const videoSender = senders.find(s => s.track?.kind === 'video');
-            if (videoSender) peer.connection.removeTrack(videoSender);
-          });
-          
-          setIsScreenSharing(false);
-          setIsVideoEnabled(false);
-          if (localVideoRef.current) localVideoRef.current.srcObject = null;
+    if (isScreenSharing) {
+        try {
+            const camStream = await navigator.mediaDevices.getUserMedia({ video: true });
+            const camTrack = camStream.getVideoTracks()[0];
+            
+            if (localStreamRef.current) {
+                const oldTrack = localStreamRef.current.getVideoTracks()[0];
+                if (oldTrack) {
+                    oldTrack.stop();
+                    localStreamRef.current.removeTrack(oldTrack);
+                }
+                localStreamRef.current.addTrack(camTrack);
+                camTrack.enabled = isVideoEnabled; 
+                
+                Object.values(peersRef.current).forEach((p: Peer) => {
+                    const sender = p.connection.getSenders().find(s => s.track?.kind === 'video');
+                    if (sender) sender.replaceTrack(camTrack);
+                });
+            }
+            setIsScreenSharing(false);
+        } catch (e) { 
+            console.error("Revert to cam failed", e); 
+        }
 
-      } else {
-          try {
-              const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-              const screenTrack = screenStream.getVideoTracks()[0];
-              
-              // Handle track end (user clicks Stop Sharing in browser UI)
-              screenTrack.onended = () => {
-                  setIsScreenSharing(false);
-                  setIsVideoEnabled(false);
-                  if (localVideoRef.current) localVideoRef.current.srcObject = null;
-                  localStreamRef.current?.removeTrack(screenTrack);
-                   Object.values(peersRef.current).forEach((peer: Peer) => {
-                    const senders = peer.connection.getSenders();
-                    const videoSender = senders.find(s => s.track?.kind === 'video');
-                    if (videoSender) peer.connection.removeTrack(videoSender);
-                  });
-              };
+    } else {
+        try {
+            const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+            const screenTrack = screenStream.getVideoTracks()[0];
+            
+            screenTrack.onended = () => toggleScreenShare();
 
-              // If there was already a video track, stop it and replace
-              const existingVideoTrack = localStreamRef.current?.getVideoTracks()[0];
-              if (existingVideoTrack) {
-                  existingVideoTrack.stop();
-                  localStreamRef.current?.removeTrack(existingVideoTrack);
-              }
-
-              localStreamRef.current?.addTrack(screenTrack);
-              
-              // Update Peers
-              Object.values(peersRef.current).forEach((peer: Peer) => {
-                  const senders = peer.connection.getSenders();
-                  const videoSender = senders.find(s => s.track?.kind === 'video');
-                  if (videoSender) {
-                      videoSender.replaceTrack(screenTrack);
-                  } else {
-                      peer.connection.addTrack(screenTrack, localStreamRef.current!);
-                  }
-              });
-
-              if (localVideoRef.current) {
-                  localVideoRef.current.srcObject = new MediaStream([screenTrack]);
-                  localVideoRef.current.play();
-              }
-              
-              setIsScreenSharing(true);
-              setIsVideoEnabled(true); // Screen share counts as video enabled for UI state generally
-
-          } catch (e) { console.error("Screen share failed", e); }
-      }
+            if (localStreamRef.current) {
+                const oldTrack = localStreamRef.current.getVideoTracks()[0];
+                if (oldTrack) {
+                    oldTrack.stop(); 
+                    localStreamRef.current.removeTrack(oldTrack);
+                }
+                localStreamRef.current.addTrack(screenTrack);
+                
+                Object.values(peersRef.current).forEach((p: Peer) => {
+                    const sender = p.connection.getSenders().find(s => s.track?.kind === 'video');
+                    if (sender) sender.replaceTrack(screenTrack);
+                });
+            }
+            setIsScreenSharing(true);
+            setIsVideoEnabled(true);
+        } catch (e) { 
+            console.error("Screen share failed", e);
+        }
+    }
   };
 
   return (
@@ -385,8 +330,8 @@ export const GroupCall: React.FC = () => {
                 >
                     {fullScreenPeerId === 'local' ? (
                         <video 
-                            ref={(el) => { if(el && localVideoRef.current) el.srcObject = localVideoRef.current.srcObject; }}
-                            autoPlay muted 
+                            ref={(el) => { if(el && localStreamRef.current) el.srcObject = localStreamRef.current; }}
+                            autoPlay muted playsInline
                             style={{ width: '100%', height: '100%', objectFit: 'contain' }} 
                         />
                     ) : (
@@ -401,17 +346,14 @@ export const GroupCall: React.FC = () => {
             )}
         </AnimatePresence>
 
-        {/* Header */}
         <div style={{ padding: '32px', textAlign: 'center', zIndex: 10 }}>
             <h2 style={{ color: theme.colors.text2, fontSize: '14px', letterSpacing: '2px', textTransform: 'uppercase' }}>
-                Codex Channel
+                Group Link
             </h2>
             <p style={{ color: theme.colors.text3, fontSize: '12px', marginTop: '8px' }}>{status}</p>
         </div>
 
-        {/* Participants Grid */}
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '24px', flexWrap: 'wrap', padding: '24px', overflowY: 'auto' }}>
-            
             {/* Me */}
             <div 
                 onClick={() => (isVideoEnabled || isScreenSharing) && setFullScreenPeerId('local')}
@@ -427,7 +369,11 @@ export const GroupCall: React.FC = () => {
                     overflow: 'hidden',
                     transition: 'all 0.3s ease'
                 }}>
-                    <video ref={localVideoRef} muted style={{ width: '100%', height: '100%', objectFit: 'cover', display: isVideoEnabled || isScreenSharing ? 'block' : 'none' }} />
+                    <video 
+                        ref={localVideoRef} 
+                        autoPlay muted playsInline
+                        style={{ width: '100%', height: '100%', objectFit: 'cover', display: isVideoEnabled || isScreenSharing ? 'block' : 'none' }} 
+                    />
                     {(!isVideoEnabled && !isScreenSharing) && (
                          <div style={{ fontSize: '36px', fontWeight: 700, color: theme.colors.text1 }}>
                              {currentUser?.username?.charAt(0).toUpperCase() || 'U'}
@@ -443,7 +389,6 @@ export const GroupCall: React.FC = () => {
             ))}
         </div>
 
-        {/* Controls */}
         <div style={{ padding: '48px 24px', display: 'flex', justifyContent: 'center', gap: '24px', background: 'linear-gradient(to top, #000 0%, transparent 100%)' }}>
             <ControlButton onClick={toggleMute} active={!isMuted} icon={isMuted ? MicrophoneSlash : Microphone} />
             <ControlButton onClick={toggleVideo} active={isVideoEnabled && !isScreenSharing} icon={isVideoEnabled && !isScreenSharing ? VideoCamera : VideoCameraSlash} />
@@ -451,7 +396,7 @@ export const GroupCall: React.FC = () => {
             
             <motion.button
                whileTap={{ scale: 0.9 }}
-               onClick={leaveCall}
+               onClick={() => navigate(-1)}
                style={{
                    width: '64px', height: '64px', borderRadius: '50%',
                    background: theme.colors.danger,
@@ -472,22 +417,20 @@ const RemotePeer: React.FC<{ peer: Peer, onMaximize: () => void }> = ({ peer, on
     const [hasVideo, setHasVideo] = useState(false);
 
     useEffect(() => {
+        // Force attachment when stream changes
         if (peer.stream && videoRef.current) {
             videoRef.current.srcObject = peer.stream;
-            videoRef.current.play().catch(e => console.error("Play error", e));
-            
-            const checkVideo = () => {
-               const videoTracks = peer.stream?.getVideoTracks();
-               setHasVideo(videoTracks && videoTracks.length > 0 && videoTracks[0].readyState === 'live' && videoTracks[0].enabled);
-            };
-            checkVideo();
-            peer.stream.addEventListener('addtrack', checkVideo);
-            peer.stream.addEventListener('removetrack', checkVideo);
-            return () => {
-                 peer.stream?.removeEventListener('addtrack', checkVideo);
-                 peer.stream?.removeEventListener('removetrack', checkVideo);
-            };
         }
+
+        // Monitoring Loop
+        const interval = setInterval(() => {
+            if (peer.stream) {
+                const vidTrack = peer.stream.getVideoTracks()[0];
+                const active = !!(vidTrack && vidTrack.enabled && !vidTrack.muted);
+                setHasVideo(active);
+            }
+        }, 1000);
+        return () => clearInterval(interval);
     }, [peer.stream]);
 
     return (
@@ -515,13 +458,11 @@ const RemotePeer: React.FC<{ peer: Peer, onMaximize: () => void }> = ({ peer, on
     );
 };
 
-// Simple FullScreen wrapper
 const FullScreenVideo: React.FC<{ peer: Peer }> = ({ peer }) => {
     const videoRef = useRef<HTMLVideoElement>(null);
     useEffect(() => {
         if(videoRef.current && peer.stream) {
             videoRef.current.srcObject = peer.stream;
-            videoRef.current.play();
         }
     }, [peer]);
     return <video ref={videoRef} style={{ width: '100%', height: '100%', objectFit: 'contain' }} autoPlay playsInline />;

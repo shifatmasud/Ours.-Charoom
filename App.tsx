@@ -17,6 +17,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { CircleNotch } from '@phosphor-icons/react';
 import { api, supabase } from './services/supabaseClient';
 import { DS } from './Theme';
+import { LiveCall } from './components/Page/LiveCall';
 
 // --- Auth Guard ---
 const RequireAuth = ({ children }: { children?: React.ReactNode }) => {
@@ -52,6 +53,7 @@ const AnimatedRoutes = () => {
         <Route path="/messages" element={<RequireAuth><MessagesList /></RequireAuth>} />
         <Route path="/messages/:friendId" element={<RequireAuth><ChatWindow /></RequireAuth>} />
         <Route path="/call/:roomId" element={<RequireAuth><GroupCall /></RequireAuth>} />
+        <Route path="/live" element={<RequireAuth><LiveCall /></RequireAuth>} />
         <Route path="/activity" element={<RequireAuth><Activity /></RequireAuth>} />
       </Routes>
     </AnimatePresence>
@@ -117,7 +119,7 @@ const AppLayout: React.FC = () => {
     }}>
       <NotificationContainer />
       <AnimatedRoutes />
-      {/* Only show Nav if logged in and not on login page (handled by Nav internal check mostly, but safer here too) */}
+      {/* Only show Nav if logged in and not on login page */}
       {user && <Nav />}
     </div>
   );

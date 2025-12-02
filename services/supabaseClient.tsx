@@ -1,5 +1,4 @@
 
-
 import { createClient } from '@supabase/supabase-js';
 import { Post, Message, Notification, Profile, CurrentUser, Comment } from '../types';
 
@@ -9,765 +8,318 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// --- Persistence Keys ---
-const KEYS = {
-  DELETED_POSTS: 'ours_deleted_posts_v1',
-  DELETED_COMMENTS: 'ours_deleted_comments_v1',
-  MOCK_MESSAGES: 'mock_messages_v2'
-};
+// --- Schema Adapters ---
 
-// --- Mock Data (Fallback & Guest Write Simulation) ---
-let MOCK_USER: CurrentUser = {
-  id: 'guest_root',
-  username: 'guest_user',
-  avatar_url: 'https://picsum.photos/seed/guest/100/100',
-  full_name: 'Guest Explorer',
-  bio: 'Just visiting the void.',
-  followers_count: 0,
-  following_count: 0,
-  is_admin: true
-};
-
-// Fallback data in case DB is empty or connection fails
-let MOCK_PROFILES: Profile[] = [
-  MOCK_USER,
-  { id: 'u2', username: 'neon_rider', avatar_url: 'https://picsum.photos/seed/u2/100/100', bio: 'Cyberpunk enthusiast', followers_count: 8500, following_count: 200 },
-  { id: 'u3', username: 'film_grain', avatar_url: 'https://picsum.photos/seed/u3/100/100', bio: 'Analog photography', followers_count: 3200, following_count: 150 },
-];
-
-let MOCK_POSTS: Post[] = [
-  {
-    id: 'p1',
-    user_id: 'u2',
-    image_url: 'https://picsum.photos/seed/art1/600/600',
-    caption: 'Fallback Content: Neon nights 🌃',
-    created_at: new Date().toISOString(),
-    profiles: MOCK_PROFILES.find(p => p.id === 'u2'),
-    likes_count: 124,
-    has_liked: false,
-    comments_count: 2
+// Helper to parse potential JSON content for rich media within the 'content' column
+export const parseMessageContent = (msg: any): Message => {
+  if (!msg) return msg;
+  try {
+    // Check if content is a JSON string containing our rich media keys
+    if (typeof msg.content === 'string' && msg.content.trim().startsWith('{')) {
+       const parsed = JSON.parse(msg.content);
+       // Verify it has expected structure
+       if (parsed.type) {
+           return {
+             ...msg,
+             content: parsed.content || parsed.text || '',
+             type: parsed.type || 'text',
+             media_url: parsed.media_url
+           };
+       }
+    }
+  } catch (e) {
+    // Fallback for plain text, do nothing
   }
-];
-
-const MOCK_COMMENTS: Comment[] = [];
-
-// Persistence for Messages
-const loadMockMessages = (): Message[] => {
-    try {
-        const stored = localStorage.getItem(KEYS.MOCK_MESSAGES);
-        return stored ? JSON.parse(stored) : [];
-    } catch {
-        return [];
-    }
+  // Ensure default type is text if parsing failed or wasn't applicable
+  return { ...msg, type: msg.type || 'text' };
 };
 
-let MOCK_MESSAGES: Message[] = loadMockMessages();
-
-const saveMockMessages = () => {
-    try {
-        localStorage.setItem(KEYS.MOCK_MESSAGES, JSON.stringify(MOCK_MESSAGES));
-    } catch (e) {
-        console.warn("Failed to save messages", e);
-    }
-};
-
-// Persistence for Deletions
-const loadSet = (key: string): Set<string> => {
-    try {
-        return new Set(JSON.parse(localStorage.getItem(key) || '[]'));
-    } catch { return new Set(); }
-};
-
-const saveSet = (key: string, set: Set<string>) => {
-    localStorage.setItem(key, JSON.stringify(Array.from(set)));
-};
-
-const MOCK_FOLLOWS = new Set<string>(); 
-// Tracking deleted items for Guest/Admin session
-const DELETED_POST_IDS = loadSet(KEYS.DELETED_POSTS);
-const DELETED_COMMENT_IDS = loadSet(KEYS.DELETED_COMMENTS);
-
-// Helper: Check if we are in Guest Mode
-const isGuestMode = () => localStorage.getItem('mock_auth') === 'true';
-
-// --- Service Layer ---
+// --- API Implementation ---
 
 export const api = {
   // --- Auth ---
   signUpWithEmail: async (email: string, pass: string, fullName: string): Promise<void> => {
-    localStorage.removeItem('mock_auth');
     const { error } = await supabase.auth.signUp({
       email,
       password: pass,
-      options: {
-        data: {
-          full_name: fullName,
-          avatar_url: `https://picsum.photos/seed/${email}/200/200`
-        }
-      }
+      options: { data: { full_name: fullName } }
     });
     if (error) throw error;
   },
 
-  signInWithPassword: async (id: string, pass: string): Promise<CurrentUser> => {
-    // Secret Guest Login Logic (root/root)
-    if (id === 'root' && pass === 'root') {
-       await new Promise(r => setTimeout(r, 800)); // Simulate network delay
-       localStorage.setItem('mock_auth', 'true');
-       
-       // Clear deletions on fresh login for root
-       DELETED_POST_IDS.clear();
-       DELETED_COMMENT_IDS.clear();
-       saveSet(KEYS.DELETED_POSTS, DELETED_POST_IDS);
-       saveSet(KEYS.DELETED_COMMENTS, DELETED_COMMENT_IDS);
-       
-       return MOCK_USER;
-    }
-    
-    // Real Auth
-    localStorage.removeItem('mock_auth');
-    const { data, error } = await supabase.auth.signInWithPassword({ email: id, password: pass });
+  signInWithPassword: async (email: string, pass: string): Promise<CurrentUser> => {
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password: pass });
     if (error) throw error;
     
-    // Fetch profile
-    const { data: profile } = await supabase.from('profiles').select('*').eq('id', data.user.id).single();
-    return profile || { 
-      id: data.user.id, 
-      username: data.user.email?.split('@')[0] || 'new_user',
-      avatar_url: 'https://picsum.photos/100/100'
-    };
+    // Fetch or construct profile
+    const profile = await api.getUserProfile(data.user.id).catch(() => null);
+    
+    if (!profile) {
+        // Fallback using auth metadata if profile row is missing
+        return {
+            id: data.user.id,
+            username: data.user.user_metadata?.full_name?.replace(/\s+/g, '_').toLowerCase() || email.split('@')[0],
+            avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${data.user.id}`,
+            full_name: data.user.user_metadata?.full_name
+        };
+    }
+    return profile;
   },
 
   resetPassword: async (email: string): Promise<void> => {
-    if (isGuestMode()) {
-       await new Promise(r => setTimeout(r, 1000));
-       return;
-    }
-    
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: window.location.origin + '/#/login',
-    });
+    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin + '/#/login' });
     if (error) throw error;
   },
 
   signOut: async (): Promise<void> => {
-    if (isGuestMode()) {
-      localStorage.removeItem('mock_auth');
-    } else {
-      await supabase.auth.signOut();
-    }
+    await supabase.auth.signOut();
     window.location.href = '/';
   },
 
   getCurrentUser: async (): Promise<CurrentUser> => {
-    if (isGuestMode()) return { ...MOCK_USER };
-
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) throw new Error('No user');
+    if (!user) throw new Error('No user logged in');
     
-    const { data, error } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+    const { data } = await supabase.from('profiles').select('*').eq('id', user.id).single();
     
-    if (error || !data) {
-       // Fallback if profile trigger hasn't run yet
-       return {
-         id: user.id,
-         username: user.email?.split('@')[0] || 'user',
-         avatar_url: user.user_metadata?.avatar_url || 'https://picsum.photos/100/100',
-         full_name: user.user_metadata?.full_name || '',
-       };
-    }
-    
-    // Fetch counts for current user too
-    const { count: followers } = await supabase.from('follows').select('*', { count: 'exact', head: true }).eq('following_id', user.id);
-    const { count: following } = await supabase.from('follows').select('*', { count: 'exact', head: true }).eq('follower_id', user.id);
-
-    return { 
-      ...data, 
-      followers_count: followers || 0,
-      following_count: following || 0
-    };
-  },
-
-  // --- Profiles ---
-  getUserProfile: async (userId: string): Promise<Profile> => {
-    if (userId === MOCK_USER.id) return MOCK_USER;
-
-    // Always try DB first (even for guest) so we can see seeded users
-    const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
-    
-    if (data) {
-      // Parallel fetch for counts to fix "0" bug
-      const [followersReq, followingReq] = await Promise.all([
-        supabase.from('follows').select('*', { count: 'exact', head: true }).eq('following_id', userId),
-        supabase.from('follows').select('*', { count: 'exact', head: true }).eq('follower_id', userId)
-      ]);
-
-      const followersCount = followersReq.count || 0;
-      const followingCount = followingReq.count || 0;
-
-      const profile = { 
-        ...data, 
-        followers_count: followersCount,
-        following_count: followingCount
-      };
-
-      // Check follow status if logged in as real user
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        const { count } = await supabase
-          .from('follows')
-          .select('*', { count: 'exact', head: true })
-          .eq('follower_id', user.id)
-          .eq('following_id', userId);
-        return { ...profile, is_following: (count || 0) > 0 };
-      } else if (isGuestMode()) {
-         return { ...profile, is_following: MOCK_FOLLOWS.has(`${MOCK_USER.id}:${userId}`) };
-      }
-      return profile;
-    }
-
-    // Fallback for missing profiles to prevent crash
+    // Return merged data or fallback from auth metadata
     return {
-        id: userId,
-        username: 'unknown',
-        avatar_url: `https://picsum.photos/seed/${userId}/100/100`,
-        bio: 'Profile not found'
+        id: user.id,
+        username: data?.username || user.user_metadata?.full_name?.replace(/\s+/g, '_').toLowerCase() || 'user',
+        avatar_url: data?.avatar_url || user.user_metadata?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.id}`,
+        full_name: data?.full_name || user.user_metadata?.full_name,
+        bio: data?.bio,
+        followers_count: data?.followers_count || 0,
+        following_count: data?.following_count || 0
     };
-  },
-
-  getAllProfiles: async (): Promise<Profile[]> => {
-    const { data } = await supabase.from('profiles').select('*').limit(50);
-    
-    let profiles = data || [];
-    
-    // If guest, inject guest user into the list if not present
-    if (isGuestMode() && !profiles.find(p => p.id === MOCK_USER.id)) {
-        profiles = [MOCK_USER, ...profiles];
-    }
-
-    // Fallback only if DB strictly empty
-    if (profiles.length === 0) return MOCK_PROFILES;
-    
-    return profiles;
   },
 
   updateCurrentUser: async (updates: Partial<CurrentUser>): Promise<CurrentUser> => {
-    if (isGuestMode()) {
-      MOCK_USER = { ...MOCK_USER, ...updates };
-      return MOCK_USER;
-    }
-
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('No user');
-
-    const { data, error } = await supabase
-      .from('profiles')
-      .update(updates)
-      .eq('id', user.id)
-      .select()
-      .single();
     
+    // Whitelist allowed fields to prevent errors with virtual properties
+    const safeUpdates: any = {};
+    if (updates.full_name !== undefined) safeUpdates.full_name = updates.full_name;
+    if (updates.bio !== undefined) safeUpdates.bio = updates.bio;
+    if (updates.avatar_url !== undefined) safeUpdates.avatar_url = updates.avatar_url;
+
+    const { data, error } = await supabase.from('profiles').update(safeUpdates).eq('id', user.id).select().single();
     if (error) throw error;
     return data;
   },
 
+  // --- Profiles ---
+  getUserProfile: async (userId: string): Promise<Profile> => {
+    const { data: { user } } = await supabase.auth.getUser();
+    const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
+    if (error) throw error;
+
+    let isFollowing = false;
+    if (user && user.id !== userId) {
+         const { data: follow } = await supabase.from('follows').select('*').match({ follower_id: user.id, following_id: userId }).single();
+         isFollowing = !!follow;
+    }
+
+    return { ...data, is_following: isFollowing };
+  },
+
+  getAllProfiles: async (): Promise<Profile[]> => {
+    const { data } = await supabase.from('profiles').select('*').limit(50);
+    return data || [];
+  },
+
   // --- Feed & Posts ---
   getFeed: async (): Promise<Post[]> => {
-    // Try fetching from real DB first, including count of likes and comments
+    const { data: { user } } = await supabase.auth.getUser();
+
+    // Fetch posts with profiles and real-time counts from related tables
     const { data, error } = await supabase
       .from('posts')
-      .select('*, profiles:user_id(*), likes(count), comments(count)') // Relational select with count
+      .select(`
+        *,
+        profiles:user_id(*),
+        likes(count),
+        comments(count)
+      `)
       .order('created_at', { ascending: false });
 
-    let realPosts: Post[] = [];
-
-    if (data && data.length > 0) {
-      // Process likes state
-      const { data: { user } } = await supabase.auth.getUser();
-      let likedSet = new Set<string>();
-      
-      if (user) {
-        const { data: likes } = await supabase.from('likes').select('post_id').eq('user_id', user.id);
-        likes?.forEach(l => likedSet.add(l.post_id));
-      }
-      
-      // Map and handle missing profiles safely
-      realPosts = data.map((p: any) => ({ 
-          ...p, 
-          profiles: p.profiles || { id: p.user_id, username: 'unknown', avatar_url: 'https://picsum.photos/100/100' },
-          has_liked: likedSet.has(p.id),
-          likes_count: p.likes ? p.likes[0]?.count : 0, // Extract count from Supabase response
-          comments_count: p.comments ? p.comments[0]?.count : 0 // Extract count from Supabase response
-      }));
-    }
-
-    // If Guest, we need to merge MOCK_POSTS and realPosts, then filter deleted
-    if (isGuestMode()) {
-        const allPosts = [...realPosts, ...MOCK_POSTS]; // Prefer Real posts first
-        // Deduplicate
-        const seen = new Set();
-        const uniquePosts = allPosts.filter(p => {
-             if (seen.has(p.id)) return false;
-             seen.add(p.id);
-             return true;
-        });
-
-        // Filter out deleted posts (simulated for Guest Admin)
-        return uniquePosts
-            .filter(p => !DELETED_POST_IDS.has(p.id))
-            .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    if (error) throw error;
+    
+    // Batch fetch 'has_liked' status for the current user
+    let likedPostIds = new Set<string>();
+    if (user) {
+        const { data: likesData } = await supabase
+            .from('likes')
+            .select('post_id')
+            .eq('user_id', user.id);
+        likesData?.forEach((l: any) => likedPostIds.add(l.post_id));
     }
     
-    const resultPosts = data ? realPosts : MOCK_POSTS;
-    return resultPosts.filter(p => !DELETED_POST_IDS.has(p.id));
+    return data.map((p: any) => ({
+         ...p,
+         profiles: p.profiles,
+         // Use the count from relations, fallback to 0
+         likes_count: p.likes?.[0]?.count || 0,
+         comments_count: p.comments?.[0]?.count || 0,
+         has_liked: likedPostIds.has(p.id)
+    }));
   },
 
   getPost: async (postId: string): Promise<Post | null> => {
-    // Check local delete first for everyone to prevent zombie posts
-    if (DELETED_POST_IDS.has(postId)) return null;
-
-    // Guest Mode Check
-    if (isGuestMode()) {
-      const mockP = MOCK_POSTS.find(p => p.id === postId);
-      if (mockP) return mockP;
-
-      // Fallback: Try to fetch real post for guest view
+      const { data: { user } } = await supabase.auth.getUser();
+      
       const { data, error } = await supabase
         .from('posts')
-        .select('*, profiles:user_id(*), likes(count), comments(count)')
+        .select(`
+          *,
+          profiles:user_id(*),
+          likes(count),
+          comments(count)
+        `)
         .eq('id', postId)
         .single();
         
-      if (data) {
-          return {
-             ...data,
-             profiles: data.profiles || { id: data.user_id, username: 'unknown', avatar_url: 'https://picsum.photos/100/100' },
-             has_liked: false,
-             likes_count: data.likes ? data.likes[0]?.count : 0,
-             comments_count: data.comments ? data.comments[0]?.count : 0
-          };
+      if (error) return null;
+
+      let hasLiked = false;
+      if (user) {
+         const { data: likeData } = await supabase
+           .from('likes')
+           .select('id')
+           .match({ post_id: postId, user_id: user.id })
+           .single();
+         hasLiked = !!likeData;
       }
-      return null;
-    }
 
-    const { data, error } = await supabase
-      .from('posts')
-      .select('*, profiles:user_id(*), likes(count), comments(count)')
-      .eq('id', postId)
-      .single();
-
-    if (error || !data) return null;
-
-    // Check if liked by current user
-    const { data: { user } } = await supabase.auth.getUser();
-    let hasLiked = false;
-    if (user) {
-      const { count } = await supabase.from('likes').select('*', { count: 'exact', head: true }).eq('post_id', postId).eq('user_id', user.id);
-      hasLiked = (count || 0) > 0;
-    }
-
-    return {
-      ...data,
-      profiles: data.profiles || { id: data.user_id, username: 'unknown', avatar_url: 'https://picsum.photos/100/100' },
-      has_liked: hasLiked,
-      likes_count: data.likes ? data.likes[0]?.count : 0,
-      comments_count: data.comments ? data.comments[0]?.count : 0
-    };
+      return {
+          ...data,
+          profiles: data.profiles,
+          likes_count: data.likes?.[0]?.count || 0,
+          comments_count: data.comments?.[0]?.count || 0,
+          has_liked: hasLiked
+      };
   },
 
   getUserPosts: async (userId: string): Promise<Post[]> => {
-    if (userId === MOCK_USER.id) {
-       return MOCK_POSTS.filter(p => p.user_id === MOCK_USER.id && !DELETED_POST_IDS.has(p.id));
-    }
-
-    // Try DB with full relations and counts
-    const { data } = await supabase
-      .from('posts')
-      .select('*, profiles:user_id(*), likes(count), comments(count)') // Include comments count
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false });
-      
-    if (data && data.length > 0) {
-        // Fetch has_liked status for viewer
-        const { data: { user } } = await supabase.auth.getUser();
-        let likedSet = new Set<string>();
-        
-        if (user) {
-            const postIds = data.map((p: any) => p.id);
-            if (postIds.length > 0) {
-              const { data: likes } = await supabase
-                .from('likes')
-                .select('post_id')
-                .eq('user_id', user.id)
-                .in('post_id', postIds);
-              likes?.forEach(l => likedSet.add(l.post_id));
-            }
-        }
-
-        const mapped = data.map((p: any) => ({
-             ...p,
-             profiles: p.profiles || { id: p.user_id, username: 'unknown', avatar_url: 'https://picsum.photos/100/100' },
-             has_liked: likedSet.has(p.id),
-             likes_count: p.likes ? p.likes[0]?.count : 0,
-             comments_count: p.comments ? p.comments[0]?.count : 0
-        }));
-
-        // Filter out deleted posts for everyone
-        return mapped.filter((p: any) => !DELETED_POST_IDS.has(p.id));
-    }
-    
-    // Fallback
-    return MOCK_POSTS.filter(p => p.user_id === userId && !DELETED_POST_IDS.has(p.id));
+      const { data } = await supabase.from('posts').select('*').eq('user_id', userId).order('created_at', { ascending: false });
+      return data || [];
   },
 
   createPost: async (imageUrl: string, caption: string, userId: string): Promise<void> => {
-    if (isGuestMode()) {
-      // Simulate locally for guest
-      MOCK_POSTS.unshift({
-        id: `mock_${Date.now()}`,
-        user_id: userId,
-        image_url: imageUrl,
-        caption,
-        created_at: new Date().toISOString(),
-        profiles: MOCK_USER,
-        likes_count: 0,
-        has_liked: false,
-        comments_count: 0
-      });
-      return;
-    }
-
-    const { error } = await supabase.from('posts').insert({ user_id: userId, image_url: imageUrl, caption });
-    if (error) throw error;
+    await supabase.from('posts').insert({ user_id: userId, image_url: imageUrl, caption });
   },
 
   deletePost: async (postId: string): Promise<void> => {
-    // Guest Mode
-    if (isGuestMode()) {
-        MOCK_POSTS = MOCK_POSTS.filter(p => p.id !== postId);
-        DELETED_POST_IDS.add(postId);
-        saveSet(KEYS.DELETED_POSTS, DELETED_POST_IDS);
-        return;
-    }
-    
-    // 1. Fetch info for storage cleanup
-    const { data: post } = await supabase.from('posts').select('image_url').eq('id', postId).single();
-    
-    // 2. Permanent Delete
-    const { error } = await supabase.from('posts').delete().eq('id', postId);
-    if (error) {
-        console.error("Delete failed:", error);
-        throw error;
-    }
-    
-    // 3. Storage Cleanup
-    if (post?.image_url) {
-        const urlParts = post.image_url.split('/images/');
-        if (urlParts.length > 1) {
-             await supabase.storage.from('images').remove([urlParts[1]]);
-        }
-    }
-
-    // 4. Local Optimistic Update
-    DELETED_POST_IDS.add(postId);
-    saveSet(KEYS.DELETED_POSTS, DELETED_POST_IDS);
+    await supabase.from('posts').delete().eq('id', postId);
   },
 
   likePost: async (postId: string, userId: string, ownerId: string): Promise<void> => {
-    if (isGuestMode()) return; // Visual toggle handled by component state
-
     // Check if already liked
-    const { data } = await supabase.from('likes').select('*').eq('user_id', userId).eq('post_id', postId).single();
+    const { data } = await supabase.from('likes').select('id').match({ user_id: userId, post_id: postId }).single();
     
     if (data) {
-       await supabase.from('likes').delete().eq('id', data.id);
+        await supabase.from('likes').delete().eq('id', data.id);
     } else {
-       await supabase.from('likes').insert({ user_id: userId, post_id: postId });
-       // Insert notification
-       if (userId !== ownerId) {
-          await supabase.from('notifications').insert({
-              user_id: ownerId,
-              sender_id: userId, // Added: Ensure sender is recorded
-              type: 'like',
-              reference_id: postId,
-              is_read: false
-          });
-       }
+        await supabase.from('likes').insert({ user_id: userId, post_id: postId });
     }
   },
 
   // --- Comments ---
   getComments: async (postId: string): Promise<Comment[]> => {
-    let comments: Comment[] = [];
-    const { data } = await supabase
-      .from('comments')
-      .select('*, profile:user_id(*)')
-      .eq('post_id', postId)
-      .order('created_at', { ascending: true });
-      
-    if (data) {
-        comments = data.map((c: any) => ({ 
-            ...c, 
-            profile: c.profile || { id: c.user_id, username: 'unknown', avatar_url: 'https://picsum.photos/30/30' }
-        }));
-    }
-    
-    if (isGuestMode()) {
-        const local = MOCK_COMMENTS.filter(c => c.post_id === postId);
-        const all = [...comments, ...local];
-        return all.filter(c => !DELETED_COMMENT_IDS.has(c.id))
-                  .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-    }
-
-    return comments.length > 0 ? comments.filter(c => !DELETED_COMMENT_IDS.has(c.id)) : MOCK_COMMENTS.filter(c => c.post_id === postId);
+    const { data } = await supabase.from('comments').select('*, profile:user_id(*)').eq('post_id', postId).order('created_at', { ascending: true });
+    return data || [];
   },
 
   addComment: async (postId: string, userId: string, content: string): Promise<Comment> => {
-    if (isGuestMode()) {
-      const c = {
-        id: `c_${Date.now()}`,
-        post_id: postId,
-        user_id: userId,
-        content,
-        created_at: new Date().toISOString(),
-        profile: MOCK_USER
-      };
-      MOCK_COMMENTS.push(c);
-      return c;
-    }
-
-    const { data, error } = await supabase
-      .from('comments')
-      .insert({ post_id: postId, user_id: userId, content })
-      .select('*, profile:user_id(*)')
-      .single();
-      
-    if (error) throw error;
-    
-    // Notify post owner
-    const { data: post } = await supabase.from('posts').select('user_id').eq('id', postId).single();
-    if (post && post.user_id !== userId) {
-        await supabase.from('notifications').insert({
-            user_id: post.user_id,
-            sender_id: userId, // Added
-            type: 'comment',
-            reference_id: postId,
-            is_read: false
-        });
-    }
-    
-    return { ...data, profile: data.profile };
-  },
-
-  deleteComment: async (commentId: string): Promise<void> => {
-    if (isGuestMode()) {
-        const index = MOCK_COMMENTS.findIndex(c => c.id === commentId);
-        if (index > -1) MOCK_COMMENTS.splice(index, 1);
-        DELETED_COMMENT_IDS.add(commentId);
-        saveSet(KEYS.DELETED_COMMENTS, DELETED_COMMENT_IDS);
-        return;
-    }
-
-    // Server delete first
-    const { error } = await supabase.from('comments').delete().eq('id', commentId);
-    if (error) throw error;
-
-    // Local tracking after success
-    DELETED_COMMENT_IDS.add(commentId);
-    saveSet(KEYS.DELETED_COMMENTS, DELETED_COMMENT_IDS);
-  },
-
-  // --- Interactions ---
-  followUser: async (followerId: string, targetId: string): Promise<void> => {
-    if (isGuestMode()) { MOCK_FOLLOWS.add(`${followerId}:${targetId}`); return; }
-    await supabase.from('follows').insert({ follower_id: followerId, following_id: targetId });
-    await supabase.from('notifications').insert({
-        user_id: targetId,
-        sender_id: followerId, // Added
-        type: 'follow',
-        reference_id: followerId,
-        is_read: false
-    });
-  },
-
-  unfollowUser: async (followerId: string, targetId: string): Promise<void> => {
-    if (isGuestMode()) { MOCK_FOLLOWS.delete(`${followerId}:${targetId}`); return; }
-    await supabase.from('follows').delete().match({ follower_id: followerId, following_id: targetId });
-  },
-
-  // --- Messaging ---
-  getMessages: async (friendId: string): Promise<Message[]> => {
-    if (friendId === 'codex') {
-        if (isGuestMode()) return MOCK_MESSAGES.filter(m => m.receiver_id === 'codex');
-        
-        const { data, error } = await supabase
-            .from('messages')
-            .select('*')
-            .eq('receiver_id', 'codex')
-            .order('created_at', { ascending: true });
-            
-        if (error || !data || data.length === 0) {
-             return MOCK_MESSAGES.filter(m => m.receiver_id === 'codex');
-        }
-        return data || [];
-    }
-
-    if (isGuestMode()) {
-        // Return messages exchanged between Guest and Friend
-        return MOCK_MESSAGES.filter(m => 
-            (m.sender_id === MOCK_USER.id && m.receiver_id === friendId) || 
-            (m.sender_id === friendId && m.receiver_id === MOCK_USER.id)
-        ).sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-    }
-
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return [];
-
-    const { data, error } = await supabase
-      .from('messages')
-      .select('*')
-      .or(`and(sender_id.eq.${user.id},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${user.id})`)
-      .order('created_at', { ascending: true });
-
+    const { data, error } = await supabase.from('comments').insert({ post_id: postId, user_id: userId, content }).select('*, profile:user_id(*)').single();
     if (error) throw error;
     return data;
   },
 
+  deleteComment: async (commentId: string): Promise<void> => {
+      await supabase.from('comments').delete().eq('id', commentId);
+  },
+
+  // --- Interactions ---
+  followUser: async (followerId: string, targetId: string): Promise<void> => {
+      await supabase.from('follows').insert({ follower_id: followerId, following_id: targetId });
+  },
+
+  unfollowUser: async (followerId: string, targetId: string): Promise<void> => {
+      await supabase.from('follows').delete().match({ follower_id: followerId, following_id: targetId });
+  },
+
+  // --- Messaging ---
+  getMessages: async (friendId: string): Promise<Message[]> => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return [];
+
+      const { data, error } = await supabase.from('messages').select('*')
+         .or(`and(sender_id.eq.${user.id},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${user.id})`)
+         .order('created_at', { ascending: true });
+         
+      if (error) throw error;
+      
+      // Parse JSON content if necessary
+      return (data || []).map(parseMessageContent);
+  },
+
   getLastMessage: async (friendId: string): Promise<Message | null> => {
-    if (friendId === 'codex') {
-        const { data } = await supabase.from('messages').select('*').eq('receiver_id', 'codex').order('created_at', { ascending: false }).limit(1);
-        const dbMsg = data?.[0];
-        const mockMsg = MOCK_MESSAGES.filter(m => m.receiver_id === 'codex').pop();
-        if (dbMsg && mockMsg) {
-             return new Date(dbMsg.created_at) > new Date(mockMsg.created_at) ? dbMsg : mockMsg;
-        }
-        return dbMsg || mockMsg || null;
-    }
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return null;
 
-    if (isGuestMode()) {
-        const msgs = MOCK_MESSAGES.filter(m => 
-            (m.sender_id === MOCK_USER.id && m.receiver_id === friendId) || 
-            (m.sender_id === friendId && m.receiver_id === MOCK_USER.id)
-        );
-        return msgs.length > 0 ? msgs[msgs.length - 1] : null;
-    }
-
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return null;
-
-    const { data } = await supabase
-      .from('messages')
-      .select('*')
-      .or(`and(sender_id.eq.${user.id},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${user.id})`)
-      .order('created_at', { ascending: false })
-      .limit(1);
-
-    return data && data.length > 0 ? data[0] : null;
+      const { data, error } = await supabase.from('messages').select('*')
+         .or(`and(sender_id.eq.${user.id},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${user.id})`)
+         .order('created_at', { ascending: false })
+         .limit(1)
+         .single();
+         
+      if (error || !data) return null;
+      return parseMessageContent(data);
   },
 
   sendMessage: async (senderId: string, receiverId: string, content: string, type: 'text' | 'image' | 'audio' = 'text', mediaUrl?: string): Promise<void> => {
-    const newMessage: Message = {
-        id: `msg_${Date.now()}_${Math.random()}`,
-        sender_id: senderId,
-        receiver_id: receiverId,
-        content: content,
-        type: type,
-        media_url: mediaUrl,
-        created_at: new Date().toISOString()
-    };
+      // Pack rich data into 'content' if it's not plain text, to support restricted schema
+      let finalContent = content;
+      if (type !== 'text' || mediaUrl) {
+          finalContent = JSON.stringify({
+              content: content,
+              type: type,
+              media_url: mediaUrl
+          });
+      }
 
-    if (isGuestMode() || receiverId === 'codex') {
-        const mockMsg = { ...newMessage };
-        MOCK_MESSAGES.push(mockMsg);
-        saveMockMessages(); 
-        
-        if (receiverId === 'codex' && !isGuestMode()) {
-             await supabase.from('messages').insert({ sender_id: senderId, receiver_id: receiverId, content, type, media_url: mediaUrl });
-        }
-        return;
-    }
-    
-    await supabase.from('messages').insert({ sender_id: senderId, receiver_id: receiverId, content, type, media_url: mediaUrl });
+      const { error } = await supabase.from('messages').insert({ 
+          sender_id: senderId, 
+          receiver_id: receiverId, 
+          content: finalContent 
+      });
+      
+      if (error) throw error;
   },
 
   // --- Storage ---
   uploadFile: async (file: File): Promise<string> => {
-    if (isGuestMode()) {
-       return URL.createObjectURL(file);
-    }
-
-    const fileExt = file.name.split('.').pop();
-    const fileName = `${Date.now()}.${fileExt}`;
-    const filePath = `${fileName}`;
-
-    const { error: uploadError } = await supabase.storage
-      .from('images')
-      .upload(filePath, file);
-
-    if (uploadError) throw uploadError;
-
-    const { data } = supabase.storage.from('images').getPublicUrl(filePath);
-    return data.publicUrl;
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${fileExt}`;
+      const { error } = await supabase.storage.from('images').upload(fileName, file);
+      if (error) throw error;
+      
+      const { data } = supabase.storage.from('images').getPublicUrl(fileName);
+      return data.publicUrl;
   },
 
-  // --- Notifications (Real) ---
+  // --- Notifications ---
   getNotifications: async (): Promise<Notification[]> => {
-    if (isGuestMode()) return [];
-
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return [];
-
-    const { data } = await supabase
-        .from('notifications')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(20);
-
-    if (data && data.length > 0) {
-        // Collect sender IDs to fetch profiles in one go
-        const senderIds = Array.from(new Set(data.map((n: any) => n.sender_id || '').filter(Boolean)));
-        
-        let profilesMap: Record<string, Profile> = {};
-        if (senderIds.length > 0) {
-            const { data: profiles } = await supabase.from('profiles').select('*').in('id', senderIds);
-            if (profiles) {
-                profiles.forEach((p: Profile) => { profilesMap[p.id] = p; });
-            }
-        }
-
-        // Fetch Post Images for "like" and "comment" notifications
-        // This ensures the thumbnails are real and not mock placeholders
-        const postIds = data
-            .filter((n: any) => (n.type === 'like' || n.type === 'comment') && n.reference_id)
-            .map((n: any) => n.reference_id);
-        
-        let postsMap: Record<string, { image_url: string }> = {};
-        if (postIds.length > 0) {
-             const { data: posts } = await supabase.from('posts').select('id, image_url').in('id', postIds);
-             if (posts) {
-                 posts.forEach((p: any) => { postsMap[p.id] = { image_url: p.image_url }; });
-             }
-        }
-
-        const notifications: Notification[] = data.map((n: any) => ({
-             ...n,
-             sender_id: n.sender_id || '',
-             sender_profile: profilesMap[n.sender_id] || { 
-                 id: n.sender_id || 'unknown', 
-                 username: 'Unknown User', 
-                 avatar_url: 'https://picsum.photos/100/100' 
-             },
-             media_url: postsMap[n.reference_id]?.image_url
-        }));
-        
-        return notifications;
-    }
-    return [];
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return [];
+      
+      const { data } = await supabase.from('notifications').select('*, sender_profile:sender_id(*)').eq('user_id', user.id).order('created_at', { ascending: false });
+      return data || [];
   },
 
   markNotificationRead: async (notifId: string) => {
-      if (isGuestMode()) return;
       await supabase.from('notifications').update({ is_read: true }).eq('id', notifId);
   }
 };

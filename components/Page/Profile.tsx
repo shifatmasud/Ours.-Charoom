@@ -1,11 +1,11 @@
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import { api } from '../../services/supabaseClient';
 import { CurrentUser, Post, Profile as UserProfile } from '../../types';
 import { Avatar } from '../Core/Avatar';
-import { SquaresFour, ChatCircleText, CaretLeft, X, SignOut } from '@phosphor-icons/react';
+import { SquaresFour, ChatCircleText, CaretLeft, X, SignOut, Camera } from '@phosphor-icons/react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { theme, commonStyles } from '../../Theme';
 import { SlotCounter } from '../Core/SlotCounter';
@@ -22,6 +22,11 @@ export const Profile: React.FC = () => {
   
   const [editName, setEditName] = useState('');
   const [editBio, setEditBio] = useState('');
+  
+  // Avatar Upload State
+  const [editAvatar, setEditAvatar] = useState<File | null>(null);
+  const [previewAvatar, setPreviewAvatar] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const loadData = async () => {
@@ -54,16 +59,35 @@ export const Profile: React.FC = () => {
     loadData();
   }, [userId]);
 
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (e.target.files && e.target.files[0]) {
+          const file = e.target.files[0];
+          setEditAvatar(file);
+          setPreviewAvatar(URL.createObjectURL(file));
+      }
+  };
+
   const handleSaveProfile = async () => {
     if (!currentUser) return;
     try {
+      let avatarUrl = currentUser.avatar_url;
+      
+      if (editAvatar) {
+         avatarUrl = await api.uploadFile(editAvatar);
+      }
+
       const updatedUser = await api.updateCurrentUser({
         full_name: editName,
-        bio: editBio
+        bio: editBio,
+        avatar_url: avatarUrl
       });
       setProfileUser(updatedUser);
       setCurrentUser(updatedUser);
       setIsEditing(false);
+      
+      // Reset upload state
+      setEditAvatar(null);
+      setPreviewAvatar(null);
     } catch (e) {
       console.error("Failed to update profile", e);
     }
@@ -301,6 +325,47 @@ export const Profile: React.FC = () => {
                      <button onClick={() => setIsEditing(false)} style={{ background: 'none', border: 'none', color: theme.colors.text1 }}>
                        <X size={24} />
                      </button>
+                   </div>
+
+                   {/* Avatar Upload */}
+                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: '32px' }}>
+                       <div 
+                         onClick={() => fileInputRef.current?.click()}
+                         style={{ position: 'relative', cursor: 'pointer', borderRadius: '50%' }}
+                       >
+                           <Avatar 
+                              src={previewAvatar || currentUser.avatar_url} 
+                              alt="preview" 
+                              size="xl" 
+                              style={{ width: '100px', height: '100px' }} 
+                           />
+                           <div style={{ 
+                               position: 'absolute', inset: 0, 
+                               background: 'rgba(0,0,0,0.4)', 
+                               borderRadius: '50%', 
+                               display: 'flex', alignItems: 'center', justifyContent: 'center',
+                               backdropFilter: 'blur(2px)'
+                           }}>
+                               <Camera size={28} color="white" weight="fill" />
+                           </div>
+                       </div>
+                       <input 
+                           type="file" 
+                           ref={fileInputRef} 
+                           onChange={handleFileSelect} 
+                           accept="image/*" 
+                           style={{ display: 'none' }} 
+                       />
+                       <button 
+                           onClick={() => fileInputRef.current?.click()}
+                           style={{ 
+                               background: 'none', border: 'none', 
+                               color: theme.colors.accent, fontSize: '13px', fontWeight: 600, 
+                               marginTop: '12px', cursor: 'pointer' 
+                           }}
+                       >
+                           Change Photo
+                       </button>
                    </div>
 
                    <div style={{ marginBottom: '24px' }}>

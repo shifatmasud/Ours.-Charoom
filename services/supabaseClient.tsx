@@ -80,7 +80,7 @@ export const api = {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('No user logged in');
     
-    const { data } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+    const { data } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle();
     
     // Fetch real-time counts directly from follows table
     const { count: followersCount } = await supabase
@@ -115,8 +115,24 @@ export const api = {
     if (updates.bio !== undefined) safeUpdates.bio = updates.bio;
     if (updates.avatar_url !== undefined) safeUpdates.avatar_url = updates.avatar_url;
 
-    const { data, error } = await supabase.from('profiles').update(safeUpdates).eq('id', user.id).select().single();
+    // Use maybeSingle to avoid error if row doesn't exist
+    const { data, error } = await supabase.from('profiles').update(safeUpdates).eq('id', user.id).select().maybeSingle();
+    
     if (error) throw error;
+    
+    if (!data) {
+        // If profile row missing, create it now
+        const username = user.user_metadata?.full_name?.replace(/\s+/g, '_').toLowerCase() || user.email?.split('@')[0] || `user_${user.id.slice(0,8)}`;
+        const { error: insertError } = await supabase.from('profiles').insert({
+            id: user.id,
+            username: username,
+            avatar_url: safeUpdates.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.id}`,
+            full_name: safeUpdates.full_name || user.user_metadata?.full_name || '',
+            bio: safeUpdates.bio || '',
+            updated_at: new Date().toISOString()
+        });
+        if (insertError) throw insertError;
+    }
     
     // Re-fetch to get correct counts and virtuals
     return await api.getUserProfile(user.id);

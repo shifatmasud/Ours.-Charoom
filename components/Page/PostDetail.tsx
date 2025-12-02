@@ -4,9 +4,10 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../../services/supabaseClient';
 import { Post, CurrentUser } from '../../types';
 import { PostCard } from '../Package/PostCard';
-import { CaretLeft, CircleNotch } from '@phosphor-icons/react';
+import { CaretLeft } from '@phosphor-icons/react';
 import { DS } from '../../Theme';
 import { commonStyles, theme } from '../../Theme';
+import { Loader } from '../Core/Loader';
 
 export const PostDetail: React.FC = () => {
   const { postId } = useParams<{ postId: string }>();
@@ -44,11 +45,7 @@ export const PostDetail: React.FC = () => {
   };
 
   if (loading) {
-    return (
-      <div style={{ ...commonStyles.flexCenter, height: '100vh', width: '100%', background: theme.colors.surface1 }}>
-        <CircleNotch size={32} className="animate-spin" color={theme.colors.accent} />
-      </div>
-    );
+    return <Loader fullscreen label="LOADING MOMENT" />;
   }
 
   if (!post || !currentUser) {

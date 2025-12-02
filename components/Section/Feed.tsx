@@ -6,6 +6,7 @@ import { Post, CurrentUser } from '../../types';
 import { CircleNotch, Image as ImageIcon, PaperPlaneRight, Sun, Moon, Bell } from '@phosphor-icons/react';
 import { Avatar } from '../Core/Avatar';
 import { Button } from '../Core/Button';
+import { Loader } from '../Core/Loader';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { DS } from '../../Theme';
@@ -125,9 +126,6 @@ export const Feed: React.FC = () => {
 
   // Easter Egg Handlers
   const handleLogoStart = (e: React.SyntheticEvent) => {
-    // Prevent context menu on long press for touch devices
-    // e.preventDefault() here might block scroll if not careful, 
-    // but we use touchAction: none in style to handle it better.
     pressTimer.current = window.setTimeout(() => {
         triggerEasterEgg();
     }, 300);
@@ -147,11 +145,7 @@ export const Feed: React.FC = () => {
   };
 
   if (loading) {
-    return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', background: DS.Color.Base.Surface[1] }}>
-        <CircleNotch size={32} className="animate-spin" color={DS.Color.Accent.Surface} />
-      </div>
-    );
+    return <Loader fullscreen label="INITIALIZING" />;
   }
 
   return (

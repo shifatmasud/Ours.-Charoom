@@ -1,15 +1,15 @@
 
-
 import React, { useEffect, useState } from 'react';
 import { api, supabase } from '../../services/supabaseClient';
 import { Notification } from '../../types';
 import { Avatar } from '../Core/Avatar';
 import { motion, AnimatePresence } from 'framer-motion';
 import { DS, theme, commonStyles } from '../../Theme';
-import { Bell, Heart, ChatCircle, UserPlus, CircleNotch, CaretLeft } from '@phosphor-icons/react';
+import { Bell, Heart, ChatCircle, UserPlus, CaretLeft } from '@phosphor-icons/react';
 import { formatDistanceToNow } from 'date-fns';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import { Loader } from '../Core/Loader';
 
 export const Activity: React.FC = () => {
   const navigate = useNavigate();
@@ -85,11 +85,7 @@ export const Activity: React.FC = () => {
   };
 
   if (loading) {
-     return (
-        <div style={{ ...commonStyles.flexCenter, height: '100vh', width: '100%', background: theme.colors.surface1 }}>
-            <CircleNotch size={32} className="animate-spin" color={theme.colors.accent} />
-        </div>
-     );
+     return <Loader fullscreen label="ACTIVITY" />;
   }
 
   return (

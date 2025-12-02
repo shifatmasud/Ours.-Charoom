@@ -9,6 +9,7 @@ import { SquaresFour, ChatCircleText, CaretLeft, X, SignOut, Camera } from '@pho
 import { motion, AnimatePresence } from 'framer-motion';
 import { theme, commonStyles } from '../../Theme';
 import { SlotCounter } from '../Core/SlotCounter';
+import { Loader } from '../Core/Loader';
 
 export const Profile: React.FC = () => {
   const { userId } = useParams<{ userId: string }>();
@@ -115,7 +116,7 @@ export const Profile: React.FC = () => {
   };
 
   if (loading) {
-    return <div style={{ ...commonStyles.flexCenter, height: '100vh', color: theme.colors.text3 }}>Loading...</div>;
+    return <Loader fullscreen label="FETCHING PROFILE" />;
   }
 
   if (!profileUser || !currentUser) return null;

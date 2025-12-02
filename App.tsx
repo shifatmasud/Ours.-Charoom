@@ -14,7 +14,7 @@ import { theme } from './Theme';
 import { ThemeProvider } from './ThemeContext';
 import { AnimatePresence, motion } from 'framer-motion';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
-import { CircleNotch } from '@phosphor-icons/react';
+import { Loader } from './components/Core/Loader';
 import { api, supabase } from './services/supabaseClient';
 import { DS } from './Theme';
 import { LiveCall } from './components/Page/LiveCall';
@@ -24,11 +24,7 @@ const RequireAuth = ({ children }: { children?: React.ReactNode }) => {
     const { user, loading } = useAuth();
     
     if (loading) {
-        return (
-            <div style={{ height: '100vh', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: theme.colors.surface1 }}>
-                <CircleNotch size={32} className="animate-spin" color={theme.colors.accent} />
-            </div>
-        );
+        return <Loader fullscreen label="AUTHENTICATING" />;
     }
 
     if (!user) {

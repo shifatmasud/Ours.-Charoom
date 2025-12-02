@@ -82,6 +82,17 @@ export const api = {
     
     const { data } = await supabase.from('profiles').select('*').eq('id', user.id).single();
     
+    // Fetch real-time counts directly from follows table
+    const { count: followersCount } = await supabase
+        .from('follows')
+        .select('*', { count: 'exact', head: true })
+        .eq('following_id', user.id);
+
+    const { count: followingCount } = await supabase
+        .from('follows')
+        .select('*', { count: 'exact', head: true })
+        .eq('follower_id', user.id);
+    
     // Return merged data or fallback from auth metadata
     return {
         id: user.id,
@@ -89,8 +100,8 @@ export const api = {
         avatar_url: data?.avatar_url || user.user_metadata?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.id}`,
         full_name: data?.full_name || user.user_metadata?.full_name,
         bio: data?.bio,
-        followers_count: data?.followers_count || 0,
-        following_count: data?.following_count || 0
+        followers_count: followersCount || 0,
+        following_count: followingCount || 0
     };
   },
 
@@ -106,7 +117,9 @@ export const api = {
 
     const { data, error } = await supabase.from('profiles').update(safeUpdates).eq('id', user.id).select().single();
     if (error) throw error;
-    return data;
+    
+    // Re-fetch to get correct counts and virtuals
+    return await api.getUserProfile(user.id);
   },
 
   // --- Profiles ---
@@ -115,13 +128,29 @@ export const api = {
     const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
     if (error) throw error;
 
+    // Fetch real-time counts from the source of truth
+    const { count: followersCount } = await supabase
+        .from('follows')
+        .select('*', { count: 'exact', head: true })
+        .eq('following_id', userId);
+
+    const { count: followingCount } = await supabase
+        .from('follows')
+        .select('*', { count: 'exact', head: true })
+        .eq('follower_id', userId);
+
     let isFollowing = false;
     if (user && user.id !== userId) {
          const { data: follow } = await supabase.from('follows').select('*').match({ follower_id: user.id, following_id: userId }).single();
          isFollowing = !!follow;
     }
 
-    return { ...data, is_following: isFollowing };
+    return { 
+        ...data, 
+        is_following: isFollowing,
+        followers_count: followersCount || 0,
+        following_count: followingCount || 0 
+    };
   },
 
   getAllProfiles: async (): Promise<Profile[]> => {

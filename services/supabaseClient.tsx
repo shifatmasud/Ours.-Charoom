@@ -15,7 +15,7 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 export const parseMessageContent = (msg: any): Message => {
   if (!msg) return msg;
   try {
-    // Check if content is a JSON string containing our rich media keys
+    // Check if content is a JSON string containing our rich media keys (for backward compatibility)
     if (typeof msg.content === 'string' && msg.content.trim().startsWith('{')) {
        const parsed = JSON.parse(msg.content);
        // Verify it has expected structure
@@ -326,30 +326,24 @@ export const api = {
   },
 
   sendMessage: async (senderId: string, receiverId: string, content: string, type: 'text' | 'image' | 'audio' = 'text', mediaUrl?: string): Promise<void> => {
-      // Pack rich data into 'content' if it's not plain text, to support restricted schema
-      let finalContent = content;
-      if (type !== 'text' || mediaUrl) {
-          finalContent = JSON.stringify({
-              content: content,
-              type: type,
-              media_url: mediaUrl
-          });
-      }
-
+      // The schema is now assumed to have dedicated 'type' and 'media_url' columns.
+      // We no longer pack rich media data into the 'content' JSON.
       const messagePayload: {
           sender_id: string;
           receiver_id: string;
           content: string;
+          type: 'text' | 'image' | 'audio';
+          media_url?: string;
           room_id?: string;
       } = { 
           sender_id: senderId, 
           receiver_id: receiverId, 
-          content: finalContent 
+          content: content,
+          type: type,
+          media_url: mediaUrl,
       };
 
       // For direct chats, create a deterministic room_id for the trigger.
-      // This is required for the private channel broadcast to work.
-      // We explicitly exclude the 'codex' channel which uses a different mechanism.
       if (receiverId !== 'codex') {
           messagePayload.room_id = [senderId, receiverId].sort().join('-');
       }

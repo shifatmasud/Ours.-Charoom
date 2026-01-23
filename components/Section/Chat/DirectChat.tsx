@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, supabase, parseMessageContent } from '../../../services/supabaseClient';
@@ -46,9 +45,22 @@ export const DirectChat: React.FC<DirectChatProps> = ({ friendId }) => {
             if (ignore) return;
             setFriendProfile(friend);
 
-            // Subscribe to DM updates
-            // We listen to the messages table and filter manually since complex OR filters are hard in realtime syntax
-            channel = supabase.channel(`dm:${user.id}:${friendId}`)
+            // Realtime Subscription Update
+            const { data: { session } } = await supabase.auth.getSession();
+            if (!session) {
+                console.error("No active session for realtime connection");
+                return;
+            }
+            supabase.realtime.setAuth(session.access_token);
+
+            const roomId = [user.id, friendId].sort().join('-');
+            const channelName = `room:${roomId}`;
+
+            channel = supabase.channel(channelName, {
+                config: {
+                    private: true,
+                },
+            })
                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, payload => {
                    const msgRaw = payload.new;
                    const msg = parseMessageContent(msgRaw);

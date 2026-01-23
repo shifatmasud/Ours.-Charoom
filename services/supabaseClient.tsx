@@ -336,21 +336,18 @@ export const api = {
           });
       }
 
+      // NOTE: `room_id` is omitted because the current database schema doesn't support it.
+      // This allows messages to be saved. The real-time component uses a public
+      // subscription as a workaround. See `DirectChat.tsx` for details on the ideal fix.
       const messagePayload: {
           sender_id: string;
           receiver_id: string;
           content: string;
-          room_id?: string;
       } = { 
           sender_id: senderId, 
           receiver_id: receiverId, 
           content: finalContent 
       };
-
-      // For direct chats, create a deterministic room_id for the trigger.
-      if (receiverId !== 'codex') {
-          messagePayload.room_id = [senderId, receiverId].sort().join('-');
-      }
 
       const { error } = await supabase.from('messages').insert(messagePayload);
       

@@ -33,39 +33,34 @@ export const DirectChat: React.FC<DirectChatProps> = ({ friendId }) => {
 
         const init = async () => {
             const user = await api.getCurrentUser();
-            if (ignore) return;
+            if (ignore || !user) return;
             setCurrentUser(user);
 
-            // Fetch Messages
-            const msgs = await api.getMessages(friendId);
+            const [msgs, allProfiles] = await Promise.all([
+                api.getMessages(friendId),
+                api.getAllProfiles()
+            ]);
+
             if (ignore) return;
             setMessages(msgs);
+            setFriendProfile(allProfiles.find(p => p.id === friendId));
 
-            const friend = (await api.getAllProfiles()).find(p => p.id === friendId);
-            if (ignore) return;
-            setFriendProfile(friend);
+            // --- Realtime Subscription ---
+            // The provided DB schema lacks a `room_id`, which the backend trigger needs for private channels.
+            // WORKAROUND: We listen to all public changes on the 'messages' table and filter client-side.
+            // This is functional but inefficient at scale.
+            //
+            // IDEAL FIX:
+            // 1. In Supabase SQL Editor, run: `ALTER TABLE public.messages ADD COLUMN room_id TEXT;`
+            // 2. Update `supabaseClient.tsx -> sendMessage` to include the `room_id` in the payload.
+            // 3. Replace this workaround with the private channel subscription logic below.
+            console.warn(`[Chat Dev] Using inefficient public subscription for real-time. See comments in DirectChat.tsx for the ideal, performant fix.`);
 
-            // Realtime Subscription Update
-            const { data: { session } } = await supabase.auth.getSession();
-            if (!session) {
-                console.error("No active session for realtime connection");
-                return;
-            }
-            supabase.realtime.setAuth(session.access_token);
-
-            const roomId = [user.id, friendId].sort().join('-');
-            const channelName = `room:${roomId}`;
-
-            channel = supabase.channel(channelName, {
-                config: {
-                    private: true,
-                },
-            })
+            channel = supabase.channel('public-messages-workaround')
                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, payload => {
                    const msgRaw = payload.new;
                    const msg = parseMessageContent(msgRaw);
                    
-                   // Filter for relevant messages (me->friend OR friend->me)
                    if ((msg.sender_id === user.id && msg.receiver_id === friendId) || 
                        (msg.sender_id === friendId && msg.receiver_id === user.id)) {
                         setMessages(prev => {
@@ -87,10 +82,8 @@ export const DirectChat: React.FC<DirectChatProps> = ({ friendId }) => {
     const handleSend = async (content: string, type: 'text'|'image'|'audio' = 'text', mediaUrl?: string) => {
         if (!currentUser) return;
         
-        // Optimistic UI Update with local ID
-        const tempId = `local_${Date.now()}_${Math.random()}`;
         const optimisticMsg: Message = {
-            id: tempId,
+            id: `local_${Date.now()}`,
             sender_id: currentUser.id,
             receiver_id: friendId,
             content,
@@ -104,6 +97,8 @@ export const DirectChat: React.FC<DirectChatProps> = ({ friendId }) => {
             await api.sendMessage(currentUser.id, friendId, content, type, mediaUrl);
         } catch (e) {
             console.error("Send failed", e);
+            // Revert optimistic update on failure
+            setMessages(prev => prev.filter(m => m.id !== optimisticMsg.id));
         }
     };
 

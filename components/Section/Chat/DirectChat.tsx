@@ -1,8 +1,8 @@
 
 import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api, supabase, parseMessageContent } from '../../../services/supabaseClient';
-import { Message, CurrentUser } from '../../../types';
+import { api, supabase } from '../../../services/supabaseClient';
+import { Message, CurrentUser, Profile } from '../../../types';
 import { motion } from 'framer-motion';
 import { theme, commonStyles } from '../../../Theme';
 import { Lightbox } from '../../Core/Lightbox';
@@ -16,9 +16,10 @@ export const DirectChat: React.FC<DirectChatProps> = ({ friendId }) => {
     const navigate = useNavigate();
     const [messages, setMessages] = useState<Message[]>([]);
     const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
-    const [friendProfile, setFriendProfile] = useState<any>(null);
+    const [friendProfile, setFriendProfile] = useState<Profile | null>(null);
     const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
+    const channelRef = useRef<any>(null);
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -29,54 +30,59 @@ export const DirectChat: React.FC<DirectChatProps> = ({ friendId }) => {
     }, [messages.length]);
 
     useEffect(() => {
-        let ignore = false;
-        let channel: any = null;
-
         const init = async () => {
-            const user = await api.getCurrentUser();
-            if (ignore) return;
-            setCurrentUser(user);
+            try {
+                const user = await api.getCurrentUser();
+                setCurrentUser(user);
 
-            // Fetch Messages
-            const msgs = await api.getMessages(friendId);
-            if (ignore) return;
-            setMessages(msgs);
+                const [msgs, friend] = await Promise.all([
+                    api.getMessages(friendId),
+                    api.getUserProfile(friendId)
+                ]);
+                setMessages(msgs);
+                setFriendProfile(friend);
 
-            const friend = (await api.getAllProfiles()).find(p => p.id === friendId);
-            if (ignore) return;
-            setFriendProfile(friend);
+                if (user) {
+                    const channelName = `dm-${[user.id, friendId].sort().join('-')}`;
+                    const ch = supabase.channel(channelName, {
+                        config: { broadcast: { self: true } }
+                    });
+                    channelRef.current = ch;
 
-            // Subscribe to DM updates
-            // We listen to the messages table and filter manually since complex OR filters are hard in realtime syntax
-            channel = supabase.channel(`dm:${user.id}:${friendId}`)
-               .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, payload => {
-                   const msgRaw = payload.new;
-                   const msg = parseMessageContent(msgRaw);
-                   
-                   // Filter for relevant messages (me->friend OR friend->me)
-                   if ((msg.sender_id === user.id && msg.receiver_id === friendId) || 
-                       (msg.sender_id === friendId && msg.receiver_id === user.id)) {
+                    ch.on('broadcast', { event: 'message' }, ({ payload }) => {
+                        const { message, tempId } = payload;
+                        
                         setMessages(prev => {
-                           if (prev.find(m => m.id === msg.id)) return prev;
-                           return [...prev, msg];
+                            if (message.sender_id === user.id && tempId) {
+                                return prev.map(m => m.id === tempId ? message : m);
+                            }
+                            if (message.sender_id !== user.id) {
+                                if (prev.find(m => m.id === message.id)) return prev;
+                                return [...prev, message];
+                            }
+                            return prev;
                         });
-                   }
-               })
-               .subscribe();
+                    }).subscribe();
+                }
+            } catch (e) {
+                console.error("Failed to initialize chat:", e);
+            }
         };
 
         init();
+        
         return () => { 
-            ignore = true; 
-            if(channel) supabase.removeChannel(channel); 
+            if (channelRef.current) {
+                supabase.removeChannel(channelRef.current);
+                channelRef.current = null;
+            }
         };
     }, [friendId]);
 
     const handleSend = async (content: string, type: 'text'|'image'|'audio' = 'text', mediaUrl?: string) => {
-        if (!currentUser) return;
+        if (!currentUser || !channelRef.current) return;
         
-        // Optimistic UI Update with local ID
-        const tempId = `local_${Date.now()}_${Math.random()}`;
+        const tempId = `local_${Date.now()}`;
         const optimisticMsg: Message = {
             id: tempId,
             sender_id: currentUser.id,
@@ -89,9 +95,10 @@ export const DirectChat: React.FC<DirectChatProps> = ({ friendId }) => {
         setMessages(prev => [...prev, optimisticMsg]);
 
         try {
-            await api.sendMessage(currentUser.id, friendId, content, type, mediaUrl);
+            await api.sendMessage(channelRef.current, currentUser.id, friendId, content, type, mediaUrl, tempId);
         } catch (e) {
             console.error("Send failed", e);
+            setMessages(prev => prev.filter(m => m.id !== tempId));
         }
     };
 

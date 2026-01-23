@@ -326,21 +326,25 @@ export const api = {
   },
 
   sendMessage: async (senderId: string, receiverId: string, content: string, type: 'text' | 'image' | 'audio' = 'text', mediaUrl?: string): Promise<void> => {
-      // The schema is now assumed to have dedicated 'type' and 'media_url' columns.
-      // We no longer pack rich media data into the 'content' JSON.
+      // Pack rich data into 'content' if it's not plain text to support the existing schema.
+      let finalContent = content;
+      if (type !== 'text' || mediaUrl) {
+          finalContent = JSON.stringify({
+              content: content,
+              type: type,
+              media_url: mediaUrl
+          });
+      }
+
       const messagePayload: {
           sender_id: string;
           receiver_id: string;
           content: string;
-          type: 'text' | 'image' | 'audio';
-          media_url?: string;
           room_id?: string;
       } = { 
           sender_id: senderId, 
           receiver_id: receiverId, 
-          content: content,
-          type: type,
-          media_url: mediaUrl,
+          content: finalContent 
       };
 
       // For direct chats, create a deterministic room_id for the trigger.

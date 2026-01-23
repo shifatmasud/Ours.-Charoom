@@ -1,5 +1,4 @@
 
-
 import { createClient } from '@supabase/supabase-js';
 import { Post, Message, Notification, Profile, CurrentUser, Comment } from '../types';
 
@@ -325,15 +324,7 @@ export const api = {
       return parseMessageContent(data);
   },
 
-  sendMessage: async (
-      channel: any, // Supabase RealtimeChannel
-      senderId: string, 
-      receiverId: string, 
-      content: string, 
-      type: 'text' | 'image' | 'audio' = 'text', 
-      mediaUrl?: string,
-      tempId?: string
-  ): Promise<void> => {
+  sendMessage: async (senderId: string, receiverId: string, content: string, type: 'text' | 'image' | 'audio' = 'text', mediaUrl?: string): Promise<void> => {
       // Pack rich data into 'content' if it's not plain text, to support restricted schema
       let finalContent = content;
       if (type !== 'text' || mediaUrl) {
@@ -344,25 +335,13 @@ export const api = {
           });
       }
 
-      // 1. Insert into DB and get the created row
-      const { data, error } = await supabase.from('messages').insert({ 
+      const { error } = await supabase.from('messages').insert({ 
           sender_id: senderId, 
           receiver_id: receiverId, 
           content: finalContent 
-      }).select().single();
+      });
       
       if (error) throw error;
-
-      const dbMessage = parseMessageContent(data);
-
-      // 2. Broadcast the message to other clients on the channel
-      if (channel) {
-          channel.send({
-              type: 'broadcast',
-              event: 'message',
-              payload: { message: dbMessage, tempId },
-          });
-      }
   },
 
   // --- Storage ---

@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { api, supabase } from '../../../services/supabaseClient';
 import { Message, CurrentUser } from '../../../types';
 import { motion } from 'framer-motion';
-import { theme, commonStyles } from '../../../Theme';
+import { theme, commonStyles, DS } from '../../../Theme';
 import { Lightbox } from '../../Core/Lightbox';
 import { ChatHeader, ChatInput, MessageBubble } from './ChatPrimitives';
 
@@ -14,7 +14,6 @@ export const ChannelChat: React.FC = () => {
     const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
     const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
-    const channelRef = useRef<any>(null);
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -25,53 +24,40 @@ export const ChannelChat: React.FC = () => {
     }, [messages.length]);
 
     useEffect(() => {
+        let ignore = false;
+        let channel: any = null;
+
         const init = async () => {
-            try {
-                const user = await api.getCurrentUser();
-                setCurrentUser(user);
-    
-                const msgs = await api.getMessages('codex');
-                setMessages(msgs);
-    
-                if (user) {
-                    const channelName = 'public-codex-chat';
-                    const ch = supabase.channel(channelName, {
-                        config: { broadcast: { self: true } }
-                    });
-                    channelRef.current = ch;
-    
-                    ch.on('broadcast', { event: 'message' }, ({ payload }) => {
-                        const { message, tempId } = payload;
-                        setMessages(prev => {
-                            if (message.sender_id === user.id && tempId) {
-                                return prev.map(m => m.id === tempId ? message : m);
-                            }
-                            if (message.sender_id !== user.id) {
-                                if (prev.find(m => m.id === message.id)) return prev;
-                                return [...prev, message];
-                            }
-                            return prev;
-                        });
-                    }).subscribe();
-                }
-            } catch(e) {
-                console.error("Failed to init codex chat", e);
-            }
+            const user = await api.getCurrentUser();
+            if (ignore) return;
+            setCurrentUser(user);
+
+            const msgs = await api.getMessages('codex');
+            if (ignore) return;
+            setMessages(msgs);
+
+            channel = supabase.channel('codex_chat_v3')
+               .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: 'receiver_id=eq.codex' }, payload => {
+                  const newMsg = payload.new as Message;
+                  setMessages(prev => {
+                      if (prev.find(m => m.id === newMsg.id)) return prev;
+                      return [...prev, newMsg];
+                  });
+               })
+               .subscribe();
         };
 
         init();
         return () => { 
-            if (channelRef.current) {
-                supabase.removeChannel(channelRef.current);
-                channelRef.current = null;
-            }
+            ignore = true; 
+            if(channel) supabase.removeChannel(channel); 
         };
     }, []);
 
     const handleSend = async (content: string, type: 'text'|'image'|'audio' = 'text', mediaUrl?: string) => {
-        if (!currentUser || !channelRef.current) return;
+        if (!currentUser) return;
 
-        const tempId = `local_${Date.now()}`;
+        const tempId = `local_${Date.now()}_${Math.random()}`;
         const optimisticMsg: Message = {
             id: tempId,
             sender_id: currentUser.id,
@@ -84,10 +70,9 @@ export const ChannelChat: React.FC = () => {
         setMessages(prev => [...prev, optimisticMsg]);
 
         try {
-            await api.sendMessage(channelRef.current, currentUser.id, 'codex', content, type, mediaUrl, tempId);
+            await api.sendMessage(currentUser.id, 'codex', content, type, mediaUrl);
         } catch (e) {
             console.error("Failed to send to Codex", e);
-            setMessages(prev => prev.filter(m => m.id !== tempId));
         }
     };
 

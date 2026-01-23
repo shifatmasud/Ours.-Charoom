@@ -1,4 +1,5 @@
 
+
 import { createClient } from '@supabase/supabase-js';
 import { Post, Message, Notification, Profile, CurrentUser, Comment } from '../types';
 
@@ -335,11 +336,25 @@ export const api = {
           });
       }
 
-      const { error } = await supabase.from('messages').insert({ 
+      const messagePayload: {
+          sender_id: string;
+          receiver_id: string;
+          content: string;
+          room_id?: string;
+      } = { 
           sender_id: senderId, 
           receiver_id: receiverId, 
           content: finalContent 
-      });
+      };
+
+      // For direct chats, create a deterministic room_id for the trigger.
+      // This is required for the private channel broadcast to work.
+      // We explicitly exclude the 'codex' channel which uses a different mechanism.
+      if (receiverId !== 'codex') {
+          messagePayload.room_id = [senderId, receiverId].sort().join('-');
+      }
+
+      const { error } = await supabase.from('messages').insert(messagePayload);
       
       if (error) throw error;
   },

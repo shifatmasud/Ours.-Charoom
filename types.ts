@@ -1,5 +1,6 @@
 
 
+
 export interface Profile {
   id: string;
   username: string;
@@ -44,6 +45,7 @@ export interface Message {
   created_at: string;
   type?: 'text' | 'image' | 'audio';
   media_url?: string;
+  room_id?: string;
 }
 
 export interface Notification {

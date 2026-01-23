@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, supabase, parseMessageContent } from '../../../services/supabaseClient';
@@ -33,34 +34,26 @@ export const DirectChat: React.FC<DirectChatProps> = ({ friendId }) => {
 
         const init = async () => {
             const user = await api.getCurrentUser();
-            if (ignore || !user) return;
+            if (ignore) return;
             setCurrentUser(user);
 
-            const [msgs, allProfiles] = await Promise.all([
-                api.getMessages(friendId),
-                api.getAllProfiles()
-            ]);
-
+            // Fetch Messages
+            const msgs = await api.getMessages(friendId);
             if (ignore) return;
             setMessages(msgs);
-            setFriendProfile(allProfiles.find(p => p.id === friendId));
 
-            // --- Realtime Subscription ---
-            // The provided DB schema lacks a `room_id`, which the backend trigger needs for private channels.
-            // WORKAROUND: We listen to all public changes on the 'messages' table and filter client-side.
-            // This is functional but inefficient at scale.
-            //
-            // IDEAL FIX:
-            // 1. In Supabase SQL Editor, run: `ALTER TABLE public.messages ADD COLUMN room_id TEXT;`
-            // 2. Update `supabaseClient.tsx -> sendMessage` to include the `room_id` in the payload.
-            // 3. Replace this workaround with the private channel subscription logic below.
-            console.warn(`[Chat Dev] Using inefficient public subscription for real-time. See comments in DirectChat.tsx for the ideal, performant fix.`);
+            const friend = (await api.getAllProfiles()).find(p => p.id === friendId);
+            if (ignore) return;
+            setFriendProfile(friend);
 
-            channel = supabase.channel('public-messages-workaround')
+            // Subscribe to DM updates
+            // We listen to the messages table and filter manually since complex OR filters are hard in realtime syntax
+            channel = supabase.channel(`dm:${user.id}:${friendId}`)
                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, payload => {
                    const msgRaw = payload.new;
                    const msg = parseMessageContent(msgRaw);
                    
+                   // Filter for relevant messages (me->friend OR friend->me)
                    if ((msg.sender_id === user.id && msg.receiver_id === friendId) || 
                        (msg.sender_id === friendId && msg.receiver_id === user.id)) {
                         setMessages(prev => {
@@ -82,8 +75,10 @@ export const DirectChat: React.FC<DirectChatProps> = ({ friendId }) => {
     const handleSend = async (content: string, type: 'text'|'image'|'audio' = 'text', mediaUrl?: string) => {
         if (!currentUser) return;
         
+        // Optimistic UI Update with local ID
+        const tempId = `local_${Date.now()}_${Math.random()}`;
         const optimisticMsg: Message = {
-            id: `local_${Date.now()}`,
+            id: tempId,
             sender_id: currentUser.id,
             receiver_id: friendId,
             content,
@@ -97,8 +92,6 @@ export const DirectChat: React.FC<DirectChatProps> = ({ friendId }) => {
             await api.sendMessage(currentUser.id, friendId, content, type, mediaUrl);
         } catch (e) {
             console.error("Send failed", e);
-            // Revert optimistic update on failure
-            setMessages(prev => prev.filter(m => m.id !== optimisticMsg.id));
         }
     };
 

@@ -1,5 +1,4 @@
 
-
 import { createClient } from '@supabase/supabase-js';
 import { Post, Message, Notification, Profile, CurrentUser, Comment } from '../types';
 
@@ -15,7 +14,7 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 export const parseMessageContent = (msg: any): Message => {
   if (!msg) return msg;
   try {
-    // Check if content is a JSON string containing our rich media keys (for backward compatibility)
+    // Check if content is a JSON string containing our rich media keys
     if (typeof msg.content === 'string' && msg.content.trim().startsWith('{')) {
        const parsed = JSON.parse(msg.content);
        // Verify it has expected structure
@@ -326,7 +325,7 @@ export const api = {
   },
 
   sendMessage: async (senderId: string, receiverId: string, content: string, type: 'text' | 'image' | 'audio' = 'text', mediaUrl?: string): Promise<void> => {
-      // Pack rich data into 'content' if it's not plain text to support the existing schema.
+      // Pack rich data into 'content' if it's not plain text, to support restricted schema
       let finalContent = content;
       if (type !== 'text' || mediaUrl) {
           finalContent = JSON.stringify({
@@ -336,20 +335,11 @@ export const api = {
           });
       }
 
-      // NOTE: `room_id` is omitted because the current database schema doesn't support it.
-      // This allows messages to be saved. The real-time component uses a public
-      // subscription as a workaround. See `DirectChat.tsx` for details on the ideal fix.
-      const messagePayload: {
-          sender_id: string;
-          receiver_id: string;
-          content: string;
-      } = { 
+      const { error } = await supabase.from('messages').insert({ 
           sender_id: senderId, 
           receiver_id: receiverId, 
           content: finalContent 
-      };
-
-      const { error } = await supabase.from('messages').insert(messagePayload);
+      });
       
       if (error) throw error;
   },

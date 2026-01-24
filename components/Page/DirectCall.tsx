@@ -16,13 +16,19 @@ interface Peer {
 
 const ICE_SERVERS = {
   iceServers: [
+    // Free, public STUN servers. More servers increase the chance of finding a connection path.
     { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:global.stun.twilio.com:3478' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun.global.max.com:3478' },
+    { urls: 'stun:stun.mixvoip.com:3478' },
+    { urls: 'stun:stun.nextcloud.com:443' },
+    
     // --- PRODUCTION CRITICAL ---
-    // The public TURN server below is for demonstration purposes to fix cross-network issues.
-    // For a real application, you MUST replace this with your own private TURN server
-    // from a service like Twilio, Xirsys, or a self-hosted COTURN instance.
-    // Public TURN servers are unreliable, not secure, and have no performance guarantees.
+    // The public TURN server below is provided for demonstration and may be unreliable or slow,
+    // which is a common cause for connection issues like 'disconnected' or 'failed' states.
+    // For a stable application, you MUST deploy your own TURN server (e.g., COTURN) or use a
+    // paid service like Twilio or Xirsys.
     {
       urls: [
         'turn:openrelay.metered.ca:80',
@@ -58,7 +64,7 @@ export const DirectCall: React.FC = () => {
 
   useEffect(() => {
     // Pre-flight security and compatibility check
-    if (window.location.protocol !== 'https:' && !['localhost', '127.0.0.1'].includes(window.location.hostname)) {
+    if (window.location.protocol !== 'https:' && !['localhost', '1227.0.0.1'].includes(window.location.hostname)) {
         setStatus('Error: Secure connection (HTTPS) required.');
         setConnectionStatus('failed');
         return;
@@ -69,6 +75,26 @@ export const DirectCall: React.FC = () => {
         return;
     }
   }, []);
+
+  const leaveCall = () => {
+      // Send leave signal before cleaning up
+      if (channelRef.current && userRef.current) {
+          channelRef.current.send({
+              type: 'broadcast',
+              event: 'leave',
+              payload: { userId: userRef.current.id }
+          });
+      }
+  
+      localStreamRef.current?.getTracks().forEach(t => t.stop());
+      Object.values(peersRef.current).forEach((p: Peer) => p.connection.close());
+      peersRef.current = {};
+      setPeers({}); // Also clear React state
+      if (channelRef.current) {
+          supabase.removeChannel(channelRef.current);
+          channelRef.current = null;
+      }
+  };
 
   useEffect(() => {
     let mounted = true;
@@ -109,6 +135,24 @@ export const DirectCall: React.FC = () => {
             if (payload.userId !== user.id) {
                 console.log(`User ${payload.userId} joined, initiating call...`);
                 createPeer(payload.userId, true);
+            }
+        });
+
+        channel.on('broadcast', { event: 'leave' }, ({ payload }: any) => {
+            if (payload.userId !== userRef.current?.id) {
+                setStatus('Peer has left the call.');
+                
+                // Clean up without broadcasting back
+                localStreamRef.current?.getTracks().forEach(t => t.stop());
+                Object.values(peersRef.current).forEach((p: Peer) => p.connection.close());
+                peersRef.current = {};
+                setPeers({});
+                if (channelRef.current) {
+                    supabase.removeChannel(channelRef.current);
+                    channelRef.current = null;
+                }
+        
+                setTimeout(() => navigate(-1), 2000);
             }
         });
 
@@ -207,11 +251,23 @@ export const DirectCall: React.FC = () => {
           console.log(`ICE state for ${targetId}: ${pc.iceConnectionState}`);
           setConnectionStatus(pc.iceConnectionState); // Update global status for UI
           
-          if (pc.iceConnectionState === 'connected') {
-            setStatus('Media connected.');
-          }
-          if (pc.iceConnectionState === 'failed') {
-            setStatus('Connection failed. Network may be too restrictive.');
+          switch (pc.iceConnectionState) {
+              case 'checking':
+                  setStatus('Establishing connection...');
+                  break;
+              case 'connected':
+              case 'completed':
+                  setStatus('Media connected.');
+                  break;
+              case 'disconnected':
+                  setStatus('Connection lost. Reconnecting...');
+                  break;
+              case 'failed':
+                  setStatus('Connection failed. Network may be too restrictive.');
+                  break;
+              case 'closed':
+                  setStatus('Call ended.');
+                  break;
           }
 
           setPeers(prev => {
@@ -248,16 +304,6 @@ export const DirectCall: React.FC = () => {
       }
 
       return peer;
-  };
-
-  const leaveCall = () => {
-      localStreamRef.current?.getTracks().forEach(t => t.stop());
-      Object.values(peersRef.current).forEach((p: Peer) => p.connection.close());
-      peersRef.current = {};
-      if (channelRef.current) {
-          supabase.removeChannel(channelRef.current);
-          channelRef.current = null;
-      }
   };
 
   const toggleMute = () => {

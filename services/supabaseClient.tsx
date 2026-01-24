@@ -1,4 +1,5 @@
 
+
 import { createClient } from '@supabase/supabase-js';
 import { Post, Message, Notification, Profile, CurrentUser, Comment } from '../types';
 
@@ -39,7 +40,8 @@ export const parseMessageContent = (msg: any): Message => {
 export const api = {
   // --- Auth ---
   signUpWithEmail: async (email: string, pass: string, fullName: string): Promise<void> => {
-    const { error } = await supabase.auth.signUp({
+    // FIX: Changed signUp to sign_up
+    const { error } = await supabase.auth.sign_up({
       email,
       password: pass,
       options: { data: { full_name: fullName } }
@@ -48,7 +50,8 @@ export const api = {
   },
 
   signInWithPassword: async (email: string, pass: string): Promise<CurrentUser> => {
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password: pass });
+    // FIX: Changed signInWithPassword to sign_in_with_password
+    const { data, error } = await supabase.auth.sign_in_with_password({ email, password: pass });
     if (error) throw error;
     
     // Fetch or construct profile
@@ -67,17 +70,20 @@ export const api = {
   },
 
   resetPassword: async (email: string): Promise<void> => {
-    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin + '/#/login' });
+    // FIX: Changed resetPasswordForEmail to reset_password_for_email
+    const { error } = await supabase.auth.reset_password_for_email(email, { redirectTo: window.location.origin + '/#/login' });
     if (error) throw error;
   },
 
   signOut: async (): Promise<void> => {
-    await supabase.auth.signOut();
+    // FIX: Changed signOut to sign_out
+    await supabase.auth.sign_out();
     window.location.href = '/';
   },
 
   getCurrentUser: async (): Promise<CurrentUser> => {
-    const { data: { user } } = await supabase.auth.getUser();
+    // FIX: Changed getUser to get_user
+    const { data: { user } } = await supabase.auth.get_user();
     if (!user) throw new Error('No user logged in');
     
     const { data } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle();
@@ -106,7 +112,8 @@ export const api = {
   },
 
   updateCurrentUser: async (updates: Partial<CurrentUser>): Promise<CurrentUser> => {
-    const { data: { user } } = await supabase.auth.getUser();
+    // FIX: Changed getUser to get_user
+    const { data: { user } } = await supabase.auth.get_user();
     if (!user) throw new Error('No user');
     
     // Whitelist allowed fields to prevent errors with virtual properties
@@ -140,7 +147,8 @@ export const api = {
 
   // --- Profiles ---
   getUserProfile: async (userId: string): Promise<Profile> => {
-    const { data: { user } } = await supabase.auth.getUser();
+    // FIX: Changed getUser to get_user
+    const { data: { user } } = await supabase.auth.get_user();
     const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
     if (error) throw error;
 
@@ -176,7 +184,8 @@ export const api = {
 
   // --- Feed & Posts ---
   getFeed: async (): Promise<Post[]> => {
-    const { data: { user } } = await supabase.auth.getUser();
+    // FIX: Changed getUser to get_user
+    const { data: { user } } = await supabase.auth.get_user();
 
     // Fetch posts with profiles and real-time counts from related tables
     const { data, error } = await supabase
@@ -212,7 +221,8 @@ export const api = {
   },
 
   getPost: async (postId: string): Promise<Post | null> => {
-      const { data: { user } } = await supabase.auth.getUser();
+      // FIX: Changed getUser to get_user
+      const { data: { user } } = await supabase.auth.get_user();
       
       const { data, error } = await supabase
         .from('posts')
@@ -297,7 +307,8 @@ export const api = {
 
   // --- Messaging ---
   getMessages: async (friendId: string): Promise<Message[]> => {
-      const { data: { user } } = await supabase.auth.getUser();
+      // FIX: Changed getUser to get_user
+      const { data: { user } } = await supabase.auth.get_user();
       if (!user) return [];
 
       const { data, error } = await supabase.from('messages').select('*')
@@ -311,7 +322,8 @@ export const api = {
   },
 
   getLastMessage: async (friendId: string): Promise<Message | null> => {
-      const { data: { user } } = await supabase.auth.getUser();
+      // FIX: Changed getUser to get_user
+      const { data: { user } } = await supabase.auth.get_user();
       if (!user) return null;
 
       const { data, error } = await supabase.from('messages').select('*')
@@ -324,7 +336,7 @@ export const api = {
       return parseMessageContent(data);
   },
 
-  sendMessage: async (senderId: string, receiverId: string, content: string, type: 'text' | 'image' | 'audio' = 'text', mediaUrl?: string): Promise<void> => {
+  sendMessage: async (senderId: string, receiverId: string, content: string, type: 'text' | 'image' | 'audio' = 'text', mediaUrl?: string): Promise<Message> => {
       // Pack rich data into 'content' if it's not plain text, to support restricted schema
       let finalContent = content;
       if (type !== 'text' || mediaUrl) {
@@ -335,13 +347,14 @@ export const api = {
           });
       }
 
-      const { error } = await supabase.from('messages').insert({ 
+      const { data, error } = await supabase.from('messages').insert({ 
           sender_id: senderId, 
           receiver_id: receiverId, 
           content: finalContent 
-      });
+      }).select().single();
       
       if (error) throw error;
+      return parseMessageContent(data);
   },
 
   // --- Storage ---
@@ -357,7 +370,8 @@ export const api = {
 
   // --- Notifications ---
   getNotifications: async (): Promise<Notification[]> => {
-      const { data: { user } } = await supabase.auth.getUser();
+      // FIX: Changed getUser to get_user
+      const { data: { user } } = await supabase.auth.get_user();
       if (!user) return [];
       
       const { data } = await supabase.from('notifications').select('*, sender_profile:sender_id(*)').eq('user_id', user.id).order('created_at', { ascending: false });

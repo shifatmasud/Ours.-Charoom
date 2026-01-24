@@ -47,16 +47,14 @@ export const DirectChat: React.FC<DirectChatProps> = ({ friendId }) => {
             setFriendProfile(friend);
 
             // Subscribe to DM updates
-            // We listen to the messages table and filter manually since complex OR filters are hard in realtime syntax
             channel = supabase.channel(`dm:${user.id}:${friendId}`)
                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, payload => {
-                   const msgRaw = payload.new;
-                   const msg = parseMessageContent(msgRaw);
+                   const msg = parseMessageContent(payload.new);
                    
-                   // Filter for relevant messages (me->friend OR friend->me)
-                   if ((msg.sender_id === user.id && msg.receiver_id === friendId) || 
-                       (msg.sender_id === friendId && msg.receiver_id === user.id)) {
+                   // REALTIME: Only add messages from the OTHER user. Own messages are handled optimistically.
+                   if (msg.sender_id === friendId && msg.receiver_id === user.id) {
                         setMessages(prev => {
+                           // Prevent duplicates from any stray events
                            if (prev.find(m => m.id === msg.id)) return prev;
                            return [...prev, msg];
                         });
@@ -75,8 +73,8 @@ export const DirectChat: React.FC<DirectChatProps> = ({ friendId }) => {
     const handleSend = async (content: string, type: 'text'|'image'|'audio' = 'text', mediaUrl?: string) => {
         if (!currentUser) return;
         
-        // Optimistic UI Update with local ID
-        const tempId = `local_${Date.now()}_${Math.random()}`;
+        // Optimistic UI Update with a unique temporary ID
+        const tempId = `local_${Date.now()}`;
         const optimisticMsg: Message = {
             id: tempId,
             sender_id: currentUser.id,
@@ -89,9 +87,13 @@ export const DirectChat: React.FC<DirectChatProps> = ({ friendId }) => {
         setMessages(prev => [...prev, optimisticMsg]);
 
         try {
-            await api.sendMessage(currentUser.id, friendId, content, type, mediaUrl);
+            const savedMessage = await api.sendMessage(currentUser.id, friendId, content, type, mediaUrl);
+            // Replace the optimistic message with the real one from the server
+            setMessages(prev => prev.map(m => m.id === tempId ? savedMessage : m));
         } catch (e) {
             console.error("Send failed", e);
+            // On failure, remove the optimistic message to indicate it wasn't sent
+            setMessages(prev => prev.filter(m => m.id !== tempId));
         }
     };
 

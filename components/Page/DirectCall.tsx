@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Peer from 'peerjs';
@@ -67,13 +66,40 @@ export const DirectCall: React.FC = () => {
 
                 setStatus('Connecting to network...');
                 
-                // By connecting to the PeerJS cloud service at 0.peerjs.com, we automatically 
-                // get access to their free STUN and TURN servers for NAT traversal.
+                // Using custom Metered TURN servers for improved connection reliability.
+                // The PeerJS cloud service is still used for signaling to connect peers.
                 const peer = new Peer(user.id, {
                     host: '0.peerjs.com', 
                     port: 443,
                     path: '/',
-                    pingInterval: 5000
+                    pingInterval: 5000,
+                    config: {
+                        iceServers: [
+                          {
+                            urls: "stun:stun.relay.metered.ca:80",
+                          },
+                          {
+                            urls: "turn:global.relay.metered.ca:80",
+                            username: "c471bbe57a75148f4bb4e9ef",
+                            credential: "cWdboQRIH0/hBLhd",
+                          },
+                          {
+                            urls: "turn:global.relay.metered.ca:80?transport=tcp",
+                            username: "c471bbe57a75148f4bb4e9ef",
+                            credential: "cWdboQRIH0/hBLhd",
+                          },
+                          {
+                            urls: "turn:global.relay.metered.ca:443",
+                            username: "c471bbe57a75148f4bb4e9ef",
+                            credential: "cWdboQRIH0/hBLhd",
+                          },
+                          {
+                            urls: "turns:global.relay.metered.ca:443?transport=tcp",
+                            username: "c471bbe57a75148f4bb4e9ef",
+                            credential: "cWdboQRIH0/hBLhd",
+                          },
+                        ]
+                    }
                 });
                 peerRef.current = peer;
 

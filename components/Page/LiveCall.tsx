@@ -135,9 +135,9 @@ export const LiveCall: React.FC = () => {
     }, [friendId, navigate]);
 
     const toggleMute = () => {
-        const enabled = !isMuted;
-        localStreamRef.current?.getAudioTracks().forEach(t => t.enabled = enabled);
-        setIsMuted(!enabled);
+        const newMutedState = !isMuted;
+        setIsMuted(newMutedState);
+        localStreamRef.current?.getAudioTracks().forEach(t => t.enabled = !newMutedState);
     };
 
     const toggleVideo = () => {

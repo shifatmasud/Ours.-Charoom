@@ -151,7 +151,7 @@ export const Feed: React.FC = () => {
   return (
     <div style={{ 
       background: DS.Color.Base.Surface[1], 
-      minHeight: '100vh', 
+      minHeight: '100%', 
       width: '100%',
       display: 'flex', 
       justifyContent: 'center' 

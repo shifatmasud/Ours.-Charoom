@@ -165,7 +165,7 @@ export const commonStyles = {
     justifyContent: 'center',
   },
   pageContainer: {
-    minHeight: '100vh',
+    minHeight: '100%',
     width: '100%',
     background: DS.Color.Base.Surface[1],
     color: DS.Color.Base.Content[1],

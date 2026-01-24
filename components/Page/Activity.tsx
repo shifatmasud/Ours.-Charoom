@@ -90,7 +90,7 @@ export const Activity: React.FC = () => {
 
   return (
     <div style={commonStyles.pageContainer}>
-        <div style={{ width: '100%', maxWidth: theme.layout.maxWidth, minHeight: '100vh', paddingBottom: '100px' }}>
+        <div style={{ width: '100%', maxWidth: theme.layout.maxWidth, minHeight: '100%', paddingBottom: '100px' }}>
             
             {/* Header */}
             <div style={{ 

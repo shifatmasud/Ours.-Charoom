@@ -85,7 +85,7 @@ export const Login: React.FC = () => {
 
   return (
     <div style={{ 
-      height: '100vh', 
+      minHeight: '100%', 
       width: '100%', 
       background: '#000000', 
       display: 'flex', 

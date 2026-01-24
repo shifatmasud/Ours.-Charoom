@@ -50,7 +50,7 @@ export const PostDetail: React.FC = () => {
 
   if (!post || !currentUser) {
     return (
-      <div style={{ ...commonStyles.flexCenter, height: '100%', width: '100%', flexDirection: 'column', background: theme.colors.surface1, color: theme.colors.text2 }}>
+      <div style={{ ...commonStyles.flexCenter, height: '100vh', width: '100%', flexDirection: 'column', background: theme.colors.surface1, color: theme.colors.text2 }}>
         <p>Moment not found.</p>
         <button onClick={() => navigate('/')} style={{ marginTop: '16px', color: theme.colors.accent, background: 'none', border: 'none', cursor: 'pointer' }}>Return Home</button>
       </div>
@@ -60,7 +60,7 @@ export const PostDetail: React.FC = () => {
   return (
     <div style={{ 
       background: DS.Color.Base.Surface[1], 
-      minHeight: '100%', 
+      minHeight: '100vh', 
       width: '100%',
       display: 'flex', 
       justifyContent: 'center' 

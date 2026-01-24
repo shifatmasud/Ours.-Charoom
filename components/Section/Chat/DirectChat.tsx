@@ -109,7 +109,7 @@ export const DirectChat: React.FC<DirectChatProps> = ({ friendId }) => {
             <motion.div 
               {...theme.motion.page}
               style={{ 
-                display: 'flex', flexDirection: 'column', height: '100%', 
+                display: 'flex', flexDirection: 'column', height: '100dvh', 
                 background: theme.colors.surface1, width: '100%', maxWidth: theme.layout.maxWidth, margin: '0 auto', position: 'relative', overflow: 'hidden'
               }}
             >

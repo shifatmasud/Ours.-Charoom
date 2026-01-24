@@ -110,7 +110,7 @@ const AppLayout: React.FC = () => {
       fontFamily: theme.fonts.body, 
       color: theme.colors.text1, 
       background: theme.colors.surface1, 
-      minHeight: '100%', 
+      minHeight: '100vh', 
       width: '100%',
       position: 'relative',
       overflowX: 'hidden',

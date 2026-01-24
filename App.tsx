@@ -38,18 +38,23 @@ const AnimatedRoutes = () => {
 
   return (
     <AnimatePresence mode="wait">
-      <Routes location={location} key={location.pathname}>
-        <Route path="/login" element={<Login />} />
-        
-        {/* Protected Routes */}
-        <Route path="/" element={<RequireAuth><Feed /></RequireAuth>} />
-        <Route path="/profile/:userId" element={<RequireAuth><Profile /></RequireAuth>} />
-        <Route path="/post/:postId" element={<RequireAuth><PostDetail /></RequireAuth>} />
-        <Route path="/messages" element={<RequireAuth><MessagesList /></RequireAuth>} />
-        <Route path="/messages/:friendId" element={<RequireAuth><ChatWindow /></RequireAuth>} />
-        <Route path="/call/:roomId" element={<RequireAuth><DirectCall /></RequireAuth>} />
-        <Route path="/activity" element={<RequireAuth><Activity /></RequireAuth>} />
-      </Routes>
+      {/* FIX: The Routes component does not accept a 'key' prop, which is needed by AnimatePresence.
+          Wrapping Routes in a motion.div with the key resolves the TypeScript error and
+          allows framer-motion to correctly animate route transitions. */}
+      <motion.div key={location.pathname}>
+        <Routes location={location}>
+          <Route path="/login" element={<Login />} />
+          
+          {/* Protected Routes */}
+          <Route path="/" element={<RequireAuth><Feed /></RequireAuth>} />
+          <Route path="/profile/:userId" element={<RequireAuth><Profile /></RequireAuth>} />
+          <Route path="/post/:postId" element={<RequireAuth><PostDetail /></RequireAuth>} />
+          <Route path="/messages" element={<RequireAuth><MessagesList /></RequireAuth>} />
+          <Route path="/messages/:friendId" element={<RequireAuth><ChatWindow /></RequireAuth>} />
+          <Route path="/call/:roomId" element={<RequireAuth><DirectCall /></RequireAuth>} />
+          <Route path="/activity" element={<RequireAuth><Activity /></RequireAuth>} />
+        </Routes>
+      </motion.div>
     </AnimatePresence>
   );
 };

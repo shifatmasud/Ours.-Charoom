@@ -19,14 +19,20 @@ const ICE_SERVERS = {
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:global.stun.twilio.com:3478' },
     // --- PRODUCTION CRITICAL ---
-    // Without a TURN server, connections will fail on restrictive networks (e.g., mobile, corporate).
-    // A TURN server acts as a relay when a direct peer-to-peer connection is impossible.
-    // Replace with your own TURN server credentials from a service like Twilio or Xirsys.
-    // {
-    //   urls: 'turn:your-turn-server.com:3478?transport=tcp',
-    //   username: 'your-username',
-    //   credential: 'your-password'
-    // }
+    // The public TURN server below is for demonstration purposes to fix cross-network issues.
+    // For a real application, you MUST replace this with your own private TURN server
+    // from a service like Twilio, Xirsys, or a self-hosted COTURN instance.
+    // Public TURN servers are unreliable, not secure, and have no performance guarantees.
+    {
+      urls: [
+        'turn:openrelay.metered.ca:80',
+        'turn:openrelay.metered.ca:443',
+        'turn:openrelay.metered.ca:80?transport=tcp',
+        'turn:openrelay.metered.ca:443?transport=tcp'
+      ],
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    }
   ]
 };
 

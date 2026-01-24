@@ -69,9 +69,9 @@ export const DirectCall: React.FC = () => {
                 // Using custom Metered TURN servers for improved connection reliability.
                 // The PeerJS cloud service is still used for signaling to connect peers.
                 const peer = new Peer(user.id, {
-                    host: '0.peerjs.com', 
-                    port: 443,
-                    path: '/',
+                    // By removing host, port, and path, we rely on the library's defaults
+                    // to connect to the public PeerJS server over a secure connection.
+                    // This can be more robust than hardcoding values that might become outdated.
                     pingInterval: 5000,
                     config: {
                         iceServers: [

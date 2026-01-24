@@ -100,7 +100,8 @@ export const DirectChat: React.FC<DirectChatProps> = ({ friendId }) => {
     const startCall = () => {
         if (!currentUser) return;
         const roomId = [currentUser.id, friendId].sort().join('-');
-        navigate(`/call/${roomId}`);
+        // Navigate to the new, more robust LiveKit call component
+        navigate(`/live/${roomId}`);
     };
 
     return (

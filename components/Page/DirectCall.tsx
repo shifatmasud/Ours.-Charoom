@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Microphone, MicrophoneSlash, PhoneDisconnect, VideoCamera, VideoCameraSlash, DesktopTower, Screencast, Users, ArrowsOut, WarningCircle, WifiHigh, WifiSlash } from '@phosphor-icons/react';
@@ -212,7 +211,7 @@ export const DirectCall: React.FC = () => {
     };
   }, [roomId]);
 
-  const createPeer = (targetId: string, initiator: boolean): Peer => {
+  const createPeer = (targetId: string, initiator: boolean): Peer | null => {
       if (peersRef.current[targetId]) return peersRef.current[targetId];
       if (Object.keys(peersRef.current).length > 0) {
           console.warn(`[WebRTC] Rejecting call from ${targetId}. A call is already in progress.`);

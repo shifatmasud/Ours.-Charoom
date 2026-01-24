@@ -9,6 +9,7 @@ import { Profile } from './components/Page/Profile';
 import { Login } from './components/Page/Login';
 import { Activity } from './components/Page/Activity';
 import { DirectCall } from './components/Page/DirectCall';
+import { LiveCall } from './components/Page/LiveCall';
 import { PostDetail } from './components/Page/PostDetail';
 import { theme } from './Theme';
 import { ThemeProvider } from './ThemeContext';
@@ -52,6 +53,7 @@ const AnimatedRoutes = () => {
           <Route path="/messages" element={<RequireAuth><MessagesList /></RequireAuth>} />
           <Route path="/messages/:friendId" element={<RequireAuth><ChatWindow /></RequireAuth>} />
           <Route path="/call/:roomId" element={<RequireAuth><DirectCall /></RequireAuth>} />
+          <Route path="/live/:roomId" element={<RequireAuth><LiveCall /></RequireAuth>} />
           <Route path="/activity" element={<RequireAuth><Activity /></RequireAuth>} />
         </Routes>
       </motion.div>

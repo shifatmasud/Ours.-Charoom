@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { motion } from 'framer-motion';
 import { DS } from '../../Theme';
@@ -29,7 +30,7 @@ export const BrandedProgressBar: React.FC<BrandedProgressBarProps> = ({
         </h2>
         <motion.div 
             animate={{ opacity: [1, 0.4, 1] }}
-            transition={{ duration: 0.6, repeat: Infinity }}
+            transition={{ duration: 1.5, repeat: Infinity }}
             style={{ 
                 fontFamily: 'monospace', 
                 fontSize: '11px', 
@@ -58,11 +59,11 @@ export const BrandedProgressBar: React.FC<BrandedProgressBarProps> = ({
             initial={{ width: '0%' }}
             animate={{ width: ['0%', '40%', '60%', '100%'] }}
             transition={{ 
-                duration: 0.8, 
+                duration: 2.5, 
                 times: [0, 0.3, 0.6, 1],
                 ease: [0.22, 1, 0.36, 1], // Custom snappy easing
                 repeat: Infinity,
-                repeatDelay: 0.1
+                repeatDelay: 0.2
             }}
             style={{
                 height: '100%',

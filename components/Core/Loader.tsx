@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { motion } from 'framer-motion';
 import { DS } from '../../Theme';
@@ -59,7 +60,7 @@ export const Loader: React.FC<LoaderProps> = ({ fullscreen = false, size = 'md',
              rotateY: [0, 360],
          }}
          transition={{
-             duration: 1.0, // Switched from 3s to 1s for super fast rotation
+             duration: 3,
              ease: "linear",
              repeat: Infinity
          }}
@@ -88,7 +89,7 @@ export const Loader: React.FC<LoaderProps> = ({ fullscreen = false, size = 'md',
            <motion.span
              initial={{ opacity: 0, y: 10 }}
              animate={{ opacity: 1, y: 0 }}
-             transition={{ duration: 0.3 }}
+             transition={{ duration: 0.5 }}
              style={{
                  ...DS.Type.Expressive.Display,
                  fontSize: '18px',

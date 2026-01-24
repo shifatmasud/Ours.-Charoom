@@ -4,7 +4,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import Peer from 'peerjs';
 import { motion } from 'framer-motion';
 import { Microphone, MicrophoneSlash, PhoneDisconnect, VideoCamera, VideoCameraSlash, WifiHigh, WifiSlash, WarningCircle, Users } from '@phosphor-icons/react';
-import { theme, commonStyles } from '../../Theme';
+import { theme, commonStyles, DS } from '../../Theme';
 import { api } from '../../services/supabaseClient';
 import { CurrentUser } from '../../types';
 
@@ -27,22 +27,13 @@ export const LiveCall: React.FC = () => {
     const remoteVideoRef = useRef<HTMLVideoElement>(null);
 
     const cleanup = () => {
-        // Stop all media tracks
         localStreamRef.current?.getTracks().forEach(track => track.stop());
-        remoteStreamRef.current?.getTracks().forEach(track => track.stop());
-        
-        // Close any active call
         if (currentCallRef.current) {
             currentCallRef.current.close();
-            currentCallRef.current = null;
         }
-
-        // Disconnect from PeerJS server
         if (peerRef.current && !peerRef.current.destroyed) {
             peerRef.current.destroy();
         }
-        
-        peerRef.current = null;
     };
 
     const leaveCall = () => {
@@ -67,10 +58,8 @@ export const LiveCall: React.FC = () => {
                 localStreamRef.current = stream;
                 if (localVideoRef.current) localVideoRef.current.srcObject = stream;
 
-                setStatus('Connecting to signaling server...');
+                setStatus('Connecting to network...');
                 const peer = new Peer(user.id, {
-                    // For production, a self-hosted PeerServer is recommended for reliability.
-                    // The public server is great for development and small-scale apps.
                     host: '0.peerjs.com', 
                     port: 443,
                     path: '/',
@@ -78,15 +67,28 @@ export const LiveCall: React.FC = () => {
                 });
                 peerRef.current = peer;
 
-                peer.on('open', (id) => {
+                const handleCallEvents = (call: any) => {
+                    currentCallRef.current = call;
+                    call.on('stream', (remoteStream: MediaStream) => {
+                        remoteStreamRef.current = remoteStream;
+                        if (remoteVideoRef.current) remoteVideoRef.current.srcObject = remoteStream;
+                        setStatus('Connected');
+                        setCallEstablished(true);
+                    });
+                    call.on('close', leaveCall);
+                    call.on('error', (err: any) => {
+                        console.error('Call error:', err);
+                        setStatus('Call error.');
+                        leaveCall();
+                    });
+                }
+
+                peer.on('open', () => {
                     if (!isMounted) return;
-                    setStatus('Ready to call...');
+                    setStatus('Ringing...');
                     if (friendId) {
-                        console.log(`Calling peer: ${friendId}`);
                         const call = peer.call(friendId, stream);
-                        currentCallRef.current = call;
-                        call.on('stream', handleRemoteStream);
-                        call.on('close', leaveCall);
+                        handleCallEvents(call);
                     }
                 });
 
@@ -94,9 +96,7 @@ export const LiveCall: React.FC = () => {
                     if (!isMounted) return;
                     setStatus('Incoming call...');
                     call.answer(stream);
-                    currentCallRef.current = call;
-                    call.on('stream', handleRemoteStream);
-                    call.on('close', leaveCall);
+                    handleCallEvents(call);
                 });
 
                 peer.on('error', (err) => {
@@ -106,7 +106,7 @@ export const LiveCall: React.FC = () => {
                 });
                 
                 peer.on('disconnected', () => {
-                    setStatus('Disconnected from server. Reconnecting...');
+                    setStatus('Reconnecting network...');
                     peer.reconnect();
                 });
 
@@ -118,18 +118,15 @@ export const LiveCall: React.FC = () => {
 
         init();
         
+        const handleUnload = () => cleanup();
+        window.addEventListener('beforeunload', handleUnload);
+
         return () => {
             isMounted = false;
             cleanup();
+            window.removeEventListener('beforeunload', handleUnload);
         };
     }, [friendId, navigate]);
-
-    const handleRemoteStream = (stream: MediaStream) => {
-        remoteStreamRef.current = stream;
-        if (remoteVideoRef.current) remoteVideoRef.current.srcObject = stream;
-        setStatus('Connected');
-        setCallEstablished(true);
-    };
 
     const toggleMute = () => {
         const enabled = !isMuted;
@@ -144,7 +141,7 @@ export const LiveCall: React.FC = () => {
     };
 
     const getStatusIcon = () => {
-        if (status.startsWith('Error')) return <WifiSlash weight="fill" color={theme.colors.danger} />;
+        if (status.startsWith('Error')) return <WifiSlash weight="fill" color={DS.Color.Status.Error} />;
         if (callEstablished) return <WifiHigh weight="fill" color="#22c55e" />;
         return <WarningCircle weight="fill" />;
     };
@@ -158,12 +155,13 @@ export const LiveCall: React.FC = () => {
             flexDirection: 'column', justifyContent: 'space-between', overflow: 'hidden'
           }}
         >
+            {/* Status Bar */}
             <div style={{ padding: '32px', textAlign: 'center', zIndex: 10, display: 'flex', justifyContent: 'center' }}>
                 <div style={{ 
                     background: status.startsWith('Error') ? 'rgba(220, 38, 38, 0.1)' : 'rgba(255,255,255,0.05)', 
-                    color: status.startsWith('Error') ? theme.colors.danger : theme.colors.text3,
-                    border: `1px solid ${status.startsWith('Error') ? theme.colors.danger : 'rgba(255,255,255,0.1)'}`,
-                    padding: '8px 16px', borderRadius: theme.radius.full,
+                    color: status.startsWith('Error') ? DS.Color.Status.Error : DS.Color.Base.Content[3],
+                    border: `1px solid ${status.startsWith('Error') ? DS.Color.Status.Error : 'rgba(255,255,255,0.1)'}`,
+                    padding: '8px 16px', borderRadius: DS.Radius.Full,
                     display: 'flex', alignItems: 'center', gap: '8px',
                     fontSize: '12px', backdropFilter: 'blur(10px)',
                 }}>
@@ -172,18 +170,20 @@ export const LiveCall: React.FC = () => {
                 </div>
             </div>
 
+            {/* Video Area */}
             <div style={{ flex: 1, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
                 {/* Remote Video (Fullscreen Background) */}
                 <video ref={remoteVideoRef} autoPlay playsInline style={{ 
+                    position: 'absolute', inset: 0,
                     width: '100%', height: '100%', objectFit: 'cover',
                     transition: 'opacity 0.5s ease', opacity: callEstablished ? 1 : 0
                 }} />
                 
-                {/* Waiting / No-Video State */}
+                {/* Waiting State */}
                 {!callEstablished && (
-                    <div style={{ ...commonStyles.flexCenter, flexDirection: 'column', gap: '16px', color: theme.colors.text2 }}>
+                    <div style={{ ...commonStyles.flexCenter, flexDirection: 'column', gap: '16px', color: DS.Color.Base.Content[2] }}>
                         <Users size={48} weight="thin" />
-                        <p style={{ fontSize: '14px' }}>Waiting for peer to connect...</p>
+                        <p style={{ fontSize: '14px' }}>Connecting to peer...</p>
                     </div>
                 )}
                 
@@ -193,7 +193,7 @@ export const LiveCall: React.FC = () => {
                     style={{
                         position: 'absolute', bottom: '140px', right: '24px',
                         width: '120px', height: '180px', borderRadius: '16px',
-                        background: theme.colors.surface3,
+                        background: DS.Color.Base.Surface[3],
                         overflow: 'hidden',
                         border: `2px solid rgba(255,255,255,0.2)`,
                         boxShadow: '0 8px 24px rgba(0,0,0,0.5)', cursor: 'grab'
@@ -213,6 +213,7 @@ export const LiveCall: React.FC = () => {
                 </motion.div>
             </div>
             
+            {/* Controls */}
             <div style={{ padding: '48px 24px', display: 'flex', justifyContent: 'center', gap: '24px', background: 'linear-gradient(to top, #000 0%, transparent 100%)' }}>
                 <ControlButton onClick={toggleMute} active={!isMuted} icon={isMuted ? MicrophoneSlash : Microphone} />
                 <ControlButton onClick={toggleVideo} active={isVideoEnabled} icon={isVideoEnabled ? VideoCamera : VideoCameraSlash} />
@@ -220,7 +221,7 @@ export const LiveCall: React.FC = () => {
                 <motion.button whileTap={{ scale: 0.9 }} onClick={leaveCall}
                    style={{
                        width: '64px', height: '64px', borderRadius: '50%',
-                       background: theme.colors.danger, color: '#fff',
+                       background: DS.Color.Status.Error, color: '#fff',
                        border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center',
                        boxShadow: '0 0 20px rgba(255, 51, 0, 0.4)', cursor: 'pointer'
                    }}
@@ -237,8 +238,8 @@ const ControlButton = ({ onClick, active, icon: Icon }: any) => (
         whileTap={{ scale: 0.9 }} onClick={onClick}
         style={{
             width: '64px', height: '64px', borderRadius: '50%',
-            background: active ? theme.colors.text1 : 'rgba(255,255,255,0.1)',
-            color: active ? '#000' : theme.colors.text1,
+            background: active ? DS.Color.Base.Content[1] : 'rgba(255,255,255,0.1)',
+            color: active ? '#000' : DS.Color.Base.Content[1],
             border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center',
             backdropFilter: 'blur(10px)', cursor: 'pointer',
             transition: 'background 0.2s, color 0.2s'

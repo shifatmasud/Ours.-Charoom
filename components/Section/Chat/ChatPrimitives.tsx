@@ -15,10 +15,14 @@ export const ChatHeader: React.FC<{
 }> = ({ title, onCall }) => {
     return (
       <div style={{ 
-        padding: '24px', 
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between', 
-        background: 'transparent',
-        zIndex: 10,
+        padding: '24px 24px 16px 24px', 
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        position: 'sticky',
+        top: 0,
+        zIndex: 50,
+        background: `linear-gradient(to bottom, ${theme.colors.surface1} 80%, transparent 100%)`,
+        backdropFilter: 'blur(12px)',
+        WebkitBackdropFilter: 'blur(12px)',
         flexShrink: 0
       }}>
         <Link to="/messages" style={{ color: theme.colors.text1, display: 'flex', alignItems: 'center', gap: '8px', textDecoration: 'none' }}>

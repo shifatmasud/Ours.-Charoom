@@ -99,9 +99,8 @@ export const DirectChat: React.FC<DirectChatProps> = ({ friendId }) => {
 
     const startCall = () => {
         if (!currentUser) return;
-        const roomId = [currentUser.id, friendId].sort().join('-');
-        // Navigate to the robust Supabase P2P call component
-        navigate(`/call/${roomId}`);
+        // Navigate to the serverless PeerJS call component, using the friend's ID directly.
+        navigate(`/call/${friendId}`);
     };
 
     return (

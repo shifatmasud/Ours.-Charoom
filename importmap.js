@@ -10,7 +10,8 @@ const importMap = {
     "gsap": "https://esm.sh/gsap@3.12.5",
     "clsx": "https://esm.sh/clsx@2.1.0",
     "tailwind-merge": "https://esm.sh/tailwind-merge@2.2.1",
-    "date-fns": "https://esm.sh/date-fns@3.3.1"
+    "date-fns": "https://esm.sh/date-fns@3.3.1",
+    "peerjs": "https://esm.sh/peerjs@1.5.2"
   }
 };
 const im = document.createElement('script');

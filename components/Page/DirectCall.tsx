@@ -16,7 +16,7 @@ interface Peer {
 
 const ICE_SERVERS = {
   iceServers: [
-    // Free, public STUN servers. More servers increase the chance of finding a connection path.
+    // A good set of public STUN servers.
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun2.l.google.com:19302' },
@@ -25,16 +25,15 @@ const ICE_SERVERS = {
     { urls: 'stun:stun.nextcloud.com:443' },
     
     // --- PRODUCTION CRITICAL ---
-    // The public TURN server below is provided for demonstration and may be unreliable or slow,
-    // which is a common cause for connection issues like 'disconnected' or 'failed' states.
-    // For a stable application, you MUST deploy your own TURN server (e.g., COTURN) or use a
-    // paid service like Twilio or Xirsys.
+    // The public TURN server below is for demonstration and may be unreliable. For a stable 
+    // application, you MUST deploy your own TURN server (e.g., COTURN) or use a paid service.
+    // We are adding `turns:` (TURN over TLS) which is more robust for traversing firewalls.
     {
       urls: [
-        'turn:openrelay.metered.ca:80',
-        'turn:openrelay.metered.ca:443',
-        'turn:openrelay.metered.ca:80?transport=tcp',
-        'turn:openrelay.metered.ca:443?transport=tcp'
+        'turn:openrelay.metered.ca:80',          // TURN over UDP
+        'turn:openrelay.metered.ca:443',         // TURN over UDP on 443
+        'turns:openrelay.metered.ca:443',        // TURN over TCP/TLS (better for firewalls)
+        'turns:openrelay.metered.ca:5349'        // Standard TURN/TLS port
       ],
       username: 'openrelayproject',
       credential: 'openrelayproject'

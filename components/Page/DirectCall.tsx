@@ -135,13 +135,25 @@ export const DirectCall: React.FC = () => {
             } catch (e) { console.error("Signaling error", e); }
         });
 
-        channel.subscribe((subStatus: string) => {
+        channel.subscribe(async (subStatus: string) => {
             if (subStatus === 'SUBSCRIBED') {
                 setStatus('Broadcasting presence...');
-                channel.send({
+                const broadcastStatus = await channel.send({
                     type: 'broadcast', event: 'join',
                     payload: { userId: user.id }
                 });
+
+                if (broadcastStatus === 'ok') {
+                    setStatus('Waiting for peer...');
+                } else {
+                    console.error('Broadcast failed with status:', broadcastStatus);
+                    setStatus('Error: Connection failed.');
+                    setConnectionStatus('failed');
+                }
+            } else if (subStatus === 'TIMED_OUT' || subStatus === 'CHANNEL_ERROR') {
+                console.error('Supabase channel subscription failed:', subStatus);
+                setStatus('Error: Real-time connection failed.');
+                setConnectionStatus('failed');
             }
         });
 
@@ -272,7 +284,8 @@ export const DirectCall: React.FC = () => {
                 localStreamRef.current.removeTrack(oldTrack);
             }
             localStreamRef.current.addTrack(newTrack);
-            Object.values(peersRef.current).forEach(p => {
+            // Fix: Explicitly type the 'p' parameter to 'Peer' to fix type inference from Object.values.
+            Object.values(peersRef.current).forEach((p: Peer) => {
                 const sender = p.connection.getSenders().find(s => s.track?.kind === 'video');
                 sender?.replaceTrack(newTrack);
             });

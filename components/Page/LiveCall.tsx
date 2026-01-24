@@ -1,9 +1,8 @@
-
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Peer from 'peerjs';
 import { motion } from 'framer-motion';
-import { Microphone, MicrophoneSlash, PhoneDisconnect, VideoCamera, VideoCameraSlash, WifiHigh, WifiSlash, WarningCircle, Users } from '@phosphor-icons/react';
+import { Microphone, MicrophoneSlash, PhoneDisconnect, VideoCamera, VideoCameraSlash, WifiHigh, WifiSlash, WarningCircle, Users, Screencast } from '@phosphor-icons/react';
 import { theme, commonStyles, DS } from '../../Theme';
 import { api } from '../../services/supabaseClient';
 import { CurrentUser } from '../../types';
@@ -16,6 +15,7 @@ export const LiveCall: React.FC = () => {
     const [status, setStatus] = useState('Initializing...');
     const [isMuted, setIsMuted] = useState(false);
     const [isVideoEnabled, setIsVideoEnabled] = useState(true);
+    const [isScreenSharing, setIsScreenSharing] = useState(false);
     const [callEstablished, setCallEstablished] = useState(false);
     
     const peerRef = useRef<Peer | null>(null);
@@ -25,6 +25,12 @@ export const LiveCall: React.FC = () => {
 
     const localVideoRef = useRef<HTMLVideoElement>(null);
     const remoteVideoRef = useRef<HTMLVideoElement>(null);
+    
+    // Ref to get latest state in callbacks
+    const isScreenSharingRef = useRef(isScreenSharing);
+    useEffect(() => {
+        isScreenSharingRef.current = isScreenSharing;
+    }, [isScreenSharing]);
 
     const cleanup = () => {
         localStreamRef.current?.getTracks().forEach(track => track.stop());
@@ -135,9 +141,71 @@ export const LiveCall: React.FC = () => {
     };
 
     const toggleVideo = () => {
+        if (isScreenSharing) return; // Don't allow camera toggle during screen share
         const enabled = !isVideoEnabled;
         localStreamRef.current?.getVideoTracks().forEach(t => t.enabled = enabled);
-        setIsVideoEnabled(!enabled);
+        setIsVideoEnabled(enabled);
+    };
+
+    const toggleScreenShare = async () => {
+        if (!currentCallRef.current || !localStreamRef.current) return;
+
+        const videoSender = currentCallRef.current.peerConnection.getSenders().find(
+            (s: RTCRtpSender) => s.track?.kind === 'video'
+        );
+
+        if (!videoSender) {
+            console.error("No video sender found");
+            setStatus("Error: Could not share screen.");
+            return;
+        }
+
+        if (isScreenSharingRef.current) {
+            // Stop screen sharing and switch back to camera
+            try {
+                const cameraStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+                const newTrack = cameraStream.getVideoTracks()[0];
+                const oldTrack = localStreamRef.current.getVideoTracks()[0];
+
+                await videoSender.replaceTrack(newTrack);
+
+                localStreamRef.current.removeTrack(oldTrack);
+                localStreamRef.current.addTrack(newTrack);
+                oldTrack.stop();
+                
+                newTrack.enabled = true;
+                setIsVideoEnabled(true);
+                setIsScreenSharing(false);
+            } catch (err) {
+                console.error("Could not switch to camera", err);
+                setStatus("Error: Camera not available.");
+            }
+        } else {
+            // Start screen sharing
+            try {
+                const displayStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+                const newTrack = displayStream.getVideoTracks()[0];
+                const oldTrack = localStreamRef.current.getVideoTracks()[0];
+
+                newTrack.onended = () => {
+                    if (isScreenSharingRef.current) {
+                        toggleScreenShare();
+                    }
+                };
+
+                await videoSender.replaceTrack(newTrack);
+
+                localStreamRef.current.removeTrack(oldTrack);
+                localStreamRef.current.addTrack(newTrack);
+                oldTrack.stop();
+
+                setIsScreenSharing(true);
+                setIsVideoEnabled(true);
+            } catch (err) {
+                console.error("Could not start screen share", err);
+                setStatus("Screen share cancelled.");
+            }
+        }
     };
 
     const getStatusIcon = () => {
@@ -202,6 +270,7 @@ export const LiveCall: React.FC = () => {
                     <video ref={localVideoRef} autoPlay muted playsInline 
                         style={{
                             width: '100%', height: '100%', objectFit: 'cover',
+                            transform: isScreenSharing ? 'scaleX(1)' : 'scaleX(-1)', // Don't mirror screen share
                             display: isVideoEnabled ? 'block' : 'none'
                         }}
                     />
@@ -216,14 +285,15 @@ export const LiveCall: React.FC = () => {
             {/* Controls */}
             <div style={{ padding: '48px 24px', display: 'flex', justifyContent: 'center', gap: '24px', background: 'linear-gradient(to top, #000 0%, transparent 100%)' }}>
                 <ControlButton onClick={toggleMute} active={!isMuted} icon={isMuted ? MicrophoneSlash : Microphone} />
-                <ControlButton onClick={toggleVideo} active={isVideoEnabled} icon={isVideoEnabled ? VideoCamera : VideoCameraSlash} />
+                <ControlButton onClick={toggleVideo} active={isVideoEnabled && !isScreenSharing} disabled={isScreenSharing} icon={isVideoEnabled ? VideoCamera : VideoCameraSlash} />
+                <ControlButton onClick={toggleScreenShare} active={isScreenSharing} icon={Screencast} activeColor={DS.Color.Accent.Surface} />
                 
                 <motion.button whileTap={{ scale: 0.9 }} onClick={leaveCall}
                    style={{
                        width: '64px', height: '64px', borderRadius: '50%',
                        background: DS.Color.Status.Error, color: '#fff',
                        border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                       boxShadow: '0 0 20px rgba(255, 51, 0, 0.4)', cursor: 'pointer'
+                       boxShadow: `0 0 20px rgba(255, 51, 0, 0.4)`, cursor: 'pointer'
                    }}
                 >
                     <PhoneDisconnect size={28} weight="fill" />
@@ -233,16 +303,20 @@ export const LiveCall: React.FC = () => {
     );
 };
 
-const ControlButton = ({ onClick, active, icon: Icon }: any) => (
+const ControlButton = ({ onClick, active, icon: Icon, disabled, activeColor }: any) => (
     <motion.button
-        whileTap={{ scale: 0.9 }} onClick={onClick}
+        whileTap={!disabled ? { scale: 0.9 } : {}}
+        onClick={onClick}
+        disabled={disabled}
         style={{
             width: '64px', height: '64px', borderRadius: '50%',
-            background: active ? DS.Color.Base.Content[1] : 'rgba(255,255,255,0.1)',
-            color: active ? '#000' : DS.Color.Base.Content[1],
+            background: active ? (activeColor || DS.Color.Base.Content[1]) : 'rgba(255,255,255,0.1)',
+            color: active ? (activeColor ? '#fff' : '#000') : DS.Color.Base.Content[1],
             border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center',
-            backdropFilter: 'blur(10px)', cursor: 'pointer',
-            transition: 'background 0.2s, color 0.2s'
+            backdropFilter: 'blur(10px)',
+            cursor: disabled ? 'not-allowed' : 'pointer',
+            transition: 'background 0.2s, color 0.2s, opacity 0.2s',
+            opacity: disabled ? 0.5 : 1
         }}
     >
         <Icon size={24} weight="fill" />

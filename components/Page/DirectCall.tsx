@@ -30,7 +30,7 @@ const ICE_SERVERS = {
   ]
 };
 
-export const GroupCall: React.FC = () => {
+export const DirectCall: React.FC = () => {
   const { roomId } = useParams<{ roomId: string }>();
   const navigate = useNavigate();
   
@@ -113,7 +113,9 @@ export const GroupCall: React.FC = () => {
             let peer = peersRef.current[from];
 
             if (!peer) {
-                peer = createPeer(from, false);
+                const newPeer = createPeer(from, false);
+                if (!newPeer) return; // Peer creation failed (call is busy)
+                peer = newPeer;
             }
 
             try {
@@ -159,7 +161,14 @@ export const GroupCall: React.FC = () => {
     };
   }, [roomId]);
 
-  const createPeer = (targetId: string, initiator: boolean) => {
+  const createPeer = (targetId: string, initiator: boolean): Peer | null => {
+      // Enforce 1-on-1 call by rejecting new connections if one already exists.
+      const existingPeers = Object.keys(peersRef.current);
+      if (existingPeers.length > 0 && !peersRef.current[targetId]) {
+          console.warn(`[DirectCall] Rejecting incoming connection from ${targetId}. A call is already in progress with ${existingPeers[0]}.`);
+          return null; // Return null to indicate failure.
+      }
+
       if (peersRef.current[targetId]) return peersRef.current[targetId];
 
       const pc = new RTCPeerConnection(ICE_SERVERS);

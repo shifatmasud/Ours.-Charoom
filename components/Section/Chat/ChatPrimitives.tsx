@@ -12,8 +12,7 @@ import { AudioPlayer } from '../../Core/AudioPlayer';
 export const ChatHeader: React.FC<{
     title: string;
     onCall?: () => void;
-    isCodex?: boolean;
-}> = ({ title, onCall, isCodex }) => {
+}> = ({ title, onCall }) => {
     return (
       <div style={{ 
         padding: '24px', 
@@ -31,7 +30,7 @@ export const ChatHeader: React.FC<{
              <motion.span 
                initial={{ opacity: 0, x: 20 }}
                animate={{ opacity: 1, x: 0 }}
-               style={{ fontWeight: 600, fontSize: '16px', color: isCodex ? DS.Color.Accent.Surface : theme.colors.text1 }}
+               style={{ fontWeight: 600, fontSize: '16px', color: theme.colors.text1 }}
               >
                  {title}
              </motion.span>
@@ -124,7 +123,7 @@ export const ChatInput: React.FC<{
     
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const audioChunksRef = useRef<Blob[]>([]);
-    const fileInputRef = useRef<HTMLInputElement>(null);
+    const fileInputRef = useRef<HTMLInputElement | null>(null);
     const timerRef = useRef<number | null>(null);
 
     const handleSendText = async () => {

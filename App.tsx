@@ -8,7 +8,7 @@ import { MessagesList } from './components/Section/MessagesList';
 import { Profile } from './components/Page/Profile';
 import { Login } from './components/Page/Login';
 import { Activity } from './components/Page/Activity';
-import { GroupCall } from './components/Page/GroupCall';
+import { DirectCall } from './components/Page/DirectCall';
 import { PostDetail } from './components/Page/PostDetail';
 import { theme } from './Theme';
 import { ThemeProvider } from './ThemeContext';
@@ -17,7 +17,6 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Loader } from './components/Core/Loader';
 import { api, supabase } from './services/supabaseClient';
 import { DS } from './Theme';
-import { LiveCall } from './components/Page/LiveCall';
 
 // --- Auth Guard ---
 const RequireAuth = ({ children }: { children?: React.ReactNode }) => {
@@ -48,8 +47,7 @@ const AnimatedRoutes = () => {
         <Route path="/post/:postId" element={<RequireAuth><PostDetail /></RequireAuth>} />
         <Route path="/messages" element={<RequireAuth><MessagesList /></RequireAuth>} />
         <Route path="/messages/:friendId" element={<RequireAuth><ChatWindow /></RequireAuth>} />
-        <Route path="/call/:roomId" element={<RequireAuth><GroupCall /></RequireAuth>} />
-        <Route path="/live" element={<RequireAuth><LiveCall /></RequireAuth>} />
+        <Route path="/call/:roomId" element={<RequireAuth><DirectCall /></RequireAuth>} />
         <Route path="/activity" element={<RequireAuth><Activity /></RequireAuth>} />
       </Routes>
     </AnimatePresence>

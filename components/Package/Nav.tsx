@@ -9,7 +9,7 @@ export const Nav: React.FC = () => {
   const location = useLocation();
   const isActive = (path: string) => location.pathname === path;
   
-  const isDetail = location.pathname.match(/^\/messages\/.+/) || location.pathname.match(/^\/post\/.+/) || location.pathname === '/login' || location.pathname === '/live';
+  const isDetail = location.pathname.match(/^\/messages\/.+/) || location.pathname.match(/^\/post\/.+/) || location.pathname.match(/^\/call\/.+/) || location.pathname === '/login' || location.pathname === '/live';
 
   if (isDetail) return null;
 

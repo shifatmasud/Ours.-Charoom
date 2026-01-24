@@ -131,10 +131,15 @@ export const DirectCall: React.FC = () => {
         channelRef.current = channel;
 
         channel.on('broadcast', { event: 'join' }, ({ payload }: any) => {
-            if (payload.userId !== user.id) {
-                console.log(`User ${payload.userId} joined, initiating call...`);
+            // FIX: Implement a tie-breaker to handle "glare" where both peers try to initiate.
+            // The peer with the lexicographically greater ID will initiate the call. This prevents
+            // a race condition that can cause media negotiation to fail.
+            if (payload.userId !== user.id && user.id > payload.userId) {
+                console.log(`User ${payload.userId} joined, I will initiate call...`);
                 createPeer(payload.userId, true);
             }
+            // The other peer (with the smaller ID) will wait for the 'offer' signal
+            // and create its peer connection at that time.
         });
 
         channel.on('broadcast', { event: 'leave' }, ({ payload }: any) => {

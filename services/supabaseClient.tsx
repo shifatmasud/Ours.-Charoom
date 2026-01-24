@@ -1,5 +1,6 @@
 
 
+
 import { createClient } from '@supabase/supabase-js';
 import { Post, Message, Notification, Profile, CurrentUser, Comment } from '../types';
 
@@ -40,8 +41,7 @@ export const parseMessageContent = (msg: any): Message => {
 export const api = {
   // --- Auth ---
   signUpWithEmail: async (email: string, pass: string, fullName: string): Promise<void> => {
-    // FIX: Changed signUp to sign_up
-    const { error } = await supabase.auth.sign_up({
+    const { error } = await supabase.auth.signUp({
       email,
       password: pass,
       options: { data: { full_name: fullName } }
@@ -50,8 +50,7 @@ export const api = {
   },
 
   signInWithPassword: async (email: string, pass: string): Promise<CurrentUser> => {
-    // FIX: Changed signInWithPassword to sign_in_with_password
-    const { data, error } = await supabase.auth.sign_in_with_password({ email, password: pass });
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password: pass });
     if (error) throw error;
     
     // Fetch or construct profile
@@ -70,20 +69,17 @@ export const api = {
   },
 
   resetPassword: async (email: string): Promise<void> => {
-    // FIX: Changed resetPasswordForEmail to reset_password_for_email
-    const { error } = await supabase.auth.reset_password_for_email(email, { redirectTo: window.location.origin + '/#/login' });
+    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin + '/#/login' });
     if (error) throw error;
   },
 
   signOut: async (): Promise<void> => {
-    // FIX: Changed signOut to sign_out
-    await supabase.auth.sign_out();
+    await supabase.auth.signOut();
     window.location.href = '/';
   },
 
   getCurrentUser: async (): Promise<CurrentUser> => {
-    // FIX: Changed getUser to get_user
-    const { data: { user } } = await supabase.auth.get_user();
+    const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('No user logged in');
     
     const { data } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle();
@@ -112,8 +108,7 @@ export const api = {
   },
 
   updateCurrentUser: async (updates: Partial<CurrentUser>): Promise<CurrentUser> => {
-    // FIX: Changed getUser to get_user
-    const { data: { user } } = await supabase.auth.get_user();
+    const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('No user');
     
     // Whitelist allowed fields to prevent errors with virtual properties
@@ -147,8 +142,7 @@ export const api = {
 
   // --- Profiles ---
   getUserProfile: async (userId: string): Promise<Profile> => {
-    // FIX: Changed getUser to get_user
-    const { data: { user } } = await supabase.auth.get_user();
+    const { data: { user } } = await supabase.auth.getUser();
     const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
     if (error) throw error;
 
@@ -184,8 +178,7 @@ export const api = {
 
   // --- Feed & Posts ---
   getFeed: async (): Promise<Post[]> => {
-    // FIX: Changed getUser to get_user
-    const { data: { user } } = await supabase.auth.get_user();
+    const { data: { user } } = await supabase.auth.getUser();
 
     // Fetch posts with profiles and real-time counts from related tables
     const { data, error } = await supabase
@@ -221,8 +214,7 @@ export const api = {
   },
 
   getPost: async (postId: string): Promise<Post | null> => {
-      // FIX: Changed getUser to get_user
-      const { data: { user } } = await supabase.auth.get_user();
+      const { data: { user } } = await supabase.auth.getUser();
       
       const { data, error } = await supabase
         .from('posts')
@@ -307,8 +299,7 @@ export const api = {
 
   // --- Messaging ---
   getMessages: async (friendId: string): Promise<Message[]> => {
-      // FIX: Changed getUser to get_user
-      const { data: { user } } = await supabase.auth.get_user();
+      const { data: { user } } = await supabase.auth.getUser();
       if (!user) return [];
 
       const { data, error } = await supabase.from('messages').select('*')
@@ -322,8 +313,7 @@ export const api = {
   },
 
   getLastMessage: async (friendId: string): Promise<Message | null> => {
-      // FIX: Changed getUser to get_user
-      const { data: { user } } = await supabase.auth.get_user();
+      const { data: { user } } = await supabase.auth.getUser();
       if (!user) return null;
 
       const { data, error } = await supabase.from('messages').select('*')
@@ -370,8 +360,7 @@ export const api = {
 
   // --- Notifications ---
   getNotifications: async (): Promise<Notification[]> => {
-      // FIX: Changed getUser to get_user
-      const { data: { user } } = await supabase.auth.get_user();
+      const { data: { user } } = await supabase.auth.getUser();
       if (!user) return [];
       
       const { data } = await supabase.from('notifications').select('*, sender_profile:sender_id(*)').eq('user_id', user.id).order('created_at', { ascending: false });

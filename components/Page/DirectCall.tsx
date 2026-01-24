@@ -76,7 +76,6 @@ export const DirectCall: React.FC = () => {
   }, []);
 
   const leaveCall = () => {
-      // Send leave signal before cleaning up
       if (channelRef.current && userRef.current) {
           channelRef.current.send({
               type: 'broadcast',
@@ -88,7 +87,7 @@ export const DirectCall: React.FC = () => {
       localStreamRef.current?.getTracks().forEach(t => t.stop());
       Object.values(peersRef.current).forEach((p: Peer) => p.connection.close());
       peersRef.current = {};
-      setPeers({}); // Also clear React state
+      setPeers({});
       if (channelRef.current) {
           supabase.removeChannel(channelRef.current);
           channelRef.current = null;
@@ -97,6 +96,11 @@ export const DirectCall: React.FC = () => {
 
   useEffect(() => {
     let mounted = true;
+
+    const handleBeforeUnload = () => {
+        leaveCall();
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
 
     const init = async () => {
       if (!mounted || status.startsWith('Error:')) return;
@@ -131,31 +135,16 @@ export const DirectCall: React.FC = () => {
         channelRef.current = channel;
 
         channel.on('broadcast', { event: 'join' }, ({ payload }: any) => {
-            // FIX: Implement a tie-breaker to handle "glare" where both peers try to initiate.
-            // The peer with the lexicographically greater ID will initiate the call. This prevents
-            // a race condition that can cause media negotiation to fail.
             if (payload.userId !== user.id && user.id > payload.userId) {
-                console.log(`User ${payload.userId} joined, I will initiate call...`);
+                console.log(`[WebRTC] User ${payload.userId} joined. I am initiator.`);
                 createPeer(payload.userId, true);
             }
-            // The other peer (with the smaller ID) will wait for the 'offer' signal
-            // and create its peer connection at that time.
         });
 
         channel.on('broadcast', { event: 'leave' }, ({ payload }: any) => {
             if (payload.userId !== userRef.current?.id) {
                 setStatus('Peer has left the call.');
-                
-                // Clean up without broadcasting back
-                localStreamRef.current?.getTracks().forEach(t => t.stop());
-                Object.values(peersRef.current).forEach((p: Peer) => p.connection.close());
-                peersRef.current = {};
-                setPeers({});
-                if (channelRef.current) {
-                    supabase.removeChannel(channelRef.current);
-                    channelRef.current = null;
-                }
-        
+                leaveCall();
                 setTimeout(() => navigate(-1), 2000);
             }
         });
@@ -166,10 +155,14 @@ export const DirectCall: React.FC = () => {
             const { from, type, data } = payload;
             let peer = peersRef.current[from];
 
+            if (!peer && type === 'offer') {
+                console.log(`[WebRTC] Received offer from ${from}. Creating peer as non-initiator.`);
+                peer = createPeer(from, false);
+            }
+
             if (!peer) {
-                const newPeer = createPeer(from, false);
-                if (!newPeer) return; // Peer creation failed (call is busy)
-                peer = newPeer;
+                console.warn(`[WebRTC] Received signal for unknown peer ${from}. Ignoring.`);
+                return;
             }
 
             try {
@@ -192,27 +185,18 @@ export const DirectCall: React.FC = () => {
         channel.subscribe(async (subStatus: string) => {
             if (subStatus === 'SUBSCRIBED') {
                 setStatus('Broadcasting presence...');
-                const broadcastStatus = await channel.send({
+                await channel.send({
                     type: 'broadcast', event: 'join',
                     payload: { userId: user.id }
                 });
-
-                if (broadcastStatus === 'ok') {
-                    setStatus('Waiting for peer...');
-                } else {
-                    console.error('Broadcast failed with status:', broadcastStatus);
-                    setStatus('Error: Connection failed.');
-                    setConnectionStatus('failed');
-                }
+                setStatus('Waiting for peer...');
             } else if (subStatus === 'TIMED_OUT' || subStatus === 'CHANNEL_ERROR') {
-                console.error('Supabase channel subscription failed:', subStatus);
                 setStatus('Error: Real-time connection failed.');
                 setConnectionStatus('failed');
             }
         });
 
       } catch (e: any) {
-        console.error(e);
         const errorMsg = e.name === 'NotAllowedError' ? 'Permissions denied.' : 'No media devices.';
         setStatus(`Error: ${errorMsg}`);
         setConnectionStatus('failed');
@@ -223,28 +207,42 @@ export const DirectCall: React.FC = () => {
 
     return () => {
         mounted = false;
+        window.removeEventListener('beforeunload', handleBeforeUnload);
         leaveCall();
     };
   }, [roomId]);
 
-  const createPeer = (targetId: string, initiator: boolean): Peer | null => {
-      // Enforce 1-on-1 call by rejecting new connections if one already exists.
-      const existingPeers = Object.keys(peersRef.current);
-      if (existingPeers.length > 0 && !peersRef.current[targetId]) {
-          console.warn(`[DirectCall] Rejecting incoming connection from ${targetId}. A call is already in progress with ${existingPeers[0]}.`);
-          return null; // Return null to indicate failure.
-      }
-
+  const createPeer = (targetId: string, initiator: boolean): Peer => {
       if (peersRef.current[targetId]) return peersRef.current[targetId];
-
+      if (Object.keys(peersRef.current).length > 0) {
+          console.warn(`[WebRTC] Rejecting call from ${targetId}. A call is already in progress.`);
+          return null;
+      }
+      
+      console.log(`[WebRTC] Creating peer connection to ${targetId}. Initiator: ${initiator}`);
       const pc = new RTCPeerConnection(ICE_SERVERS);
       
       localStreamRef.current?.getTracks().forEach(track => {
           pc.addTrack(track, localStreamRef.current!);
       });
 
+      pc.onnegotiationneeded = async () => {
+          if (initiator) {
+              try {
+                  console.log('[WebRTC] onnegotiationneeded: creating offer...');
+                  const offer = await pc.createOffer();
+                  await pc.setLocalDescription(offer);
+                  channelRef.current?.send({
+                      type: 'broadcast', event: 'signal',
+                      payload: { to: targetId, from: userRef.current?.id, type: 'offer', data: pc.localDescription }
+                  });
+              } catch (e) {
+                  console.error('[WebRTC] onnegotiationneeded failed:', e);
+              }
+          }
+      };
+
       pc.ontrack = (event) => {
-          console.log(`Received media stream from ${targetId}`);
           setPeers(prev => ({
               ...prev,
               [targetId]: { ...prev[targetId], stream: event.streams[0] }
@@ -252,34 +250,19 @@ export const DirectCall: React.FC = () => {
       };
 
       pc.oniceconnectionstatechange = () => {
-          console.log(`ICE state for ${targetId}: ${pc.iceConnectionState}`);
-          setConnectionStatus(pc.iceConnectionState); // Update global status for UI
+          console.log(`[WebRTC] ICE state for ${targetId}: ${pc.iceConnectionState}`);
+          setConnectionStatus(pc.iceConnectionState);
           
           switch (pc.iceConnectionState) {
-              case 'checking':
-                  setStatus('Establishing connection...');
-                  break;
-              case 'connected':
-              case 'completed':
-                  setStatus('Media connected.');
-                  break;
+              case 'checking': setStatus('Establishing connection...'); break;
+              case 'connected': case 'completed': setStatus('Media connected.'); break;
               case 'disconnected':
                   setStatus('Connection lost. Reconnecting...');
+                  if (initiator && pc.restartIce) pc.restartIce();
                   break;
-              case 'failed':
-                  setStatus('Connection failed. Network may be too restrictive.');
-                  break;
-              case 'closed':
-                  setStatus('Call ended.');
-                  break;
+              case 'failed': setStatus('Connection failed. Your network may be blocking the connection.'); break;
+              case 'closed': setStatus('Call ended.'); break;
           }
-
-          setPeers(prev => {
-              if (prev[targetId]) {
-                  return { ...prev, [targetId]: { ...prev[targetId], connectionState: pc.iceConnectionState }};
-              }
-              return prev;
-          });
       };
 
       pc.onicecandidate = (event) => {
@@ -291,86 +274,60 @@ export const DirectCall: React.FC = () => {
           }
       };
 
+// FIX: Explicitly type the `peer` object to ensure `connectionState` is correctly typed as `RTCIceConnectionState`, which resolves downstream type errors.
       const peer: Peer = { id: targetId, connection: pc, connectionState: 'new' };
       peersRef.current[targetId] = peer;
       setPeers(prev => ({ ...prev, [targetId]: peer }));
-
-      if (initiator) {
-          pc.createOffer()
-            .then(offer => pc.setLocalDescription(offer))
-            .then(() => {
-                channelRef.current?.send({
-                    type: 'broadcast', event: 'signal',
-                    payload: { to: targetId, from: userRef.current?.id, type: 'offer', data: pc.localDescription }
-                });
-            })
-            .catch(e => console.error("Offer creation failed", e));
-      }
-
       return peer;
   };
 
   const toggleMute = () => {
-      if (localStreamRef.current) {
-          const track = localStreamRef.current.getAudioTracks()[0];
-          if (track) {
-              track.enabled = !track.enabled;
-              setIsMuted(!track.enabled);
-          }
-      }
+      localStreamRef.current?.getAudioTracks().forEach(t => t.enabled = !t.enabled);
+      setIsMuted(prev => !prev);
   };
 
   const toggleVideo = () => {
-      if (localStreamRef.current) {
-          const track = localStreamRef.current.getVideoTracks()[0];
-          if (track) {
-              track.enabled = !track.enabled;
-              setIsVideoEnabled(track.enabled);
-              if (isScreenSharing && track.enabled) setIsScreenSharing(false);
-          }
-      }
+      if (isScreenSharing) return;
+      localStreamRef.current?.getVideoTracks().forEach(t => t.enabled = !t.enabled);
+      setIsVideoEnabled(prev => !prev);
   };
 
   const toggleScreenShare = async () => {
-    const replaceVideoTrack = (newTrack: MediaStreamTrack) => {
-        if (localStreamRef.current) {
-            const oldTrack = localStreamRef.current.getVideoTracks()[0];
-            if (oldTrack) {
-                oldTrack.stop();
-                localStreamRef.current.removeTrack(oldTrack);
-            }
-            localStreamRef.current.addTrack(newTrack);
-            // Fix: Explicitly type the 'p' parameter to 'Peer' to fix type inference from Object.values.
-            Object.values(peersRef.current).forEach((p: Peer) => {
-                const sender = p.connection.getSenders().find(s => s.track?.kind === 'video');
-                sender?.replaceTrack(newTrack);
+    const replaceVideoTrack = (newTrack: MediaStreamTrack | null) => {
+        const sender = Object.values(peersRef.current)[0]?.connection.getSenders().find(s => s.track?.kind === 'video');
+        if (sender) sender.replaceTrack(newTrack);
+        
+        if(localStreamRef.current) {
+            localStreamRef.current.getVideoTracks().forEach(t => {
+                t.stop();
+                localStreamRef.current.removeTrack(t);
             });
+            if (newTrack) localStreamRef.current.addTrack(newTrack);
         }
     };
 
     if (isScreenSharing) {
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-            const newTrack = stream.getVideoTracks()[0];
-            replaceVideoTrack(newTrack);
-            setIsScreenSharing(false);
-        } catch (e) { console.error("Cam failed", e); }
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        const camTrack = stream.getVideoTracks()[0];
+        replaceVideoTrack(camTrack);
+        setIsScreenSharing(false);
+        setIsVideoEnabled(true);
     } else {
-        try {
-            const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-            const newTrack = stream.getVideoTracks()[0];
-            newTrack.onended = () => toggleScreenShare();
-            replaceVideoTrack(newTrack);
-            setIsScreenSharing(true);
-            setIsVideoEnabled(true);
-        } catch (e) { console.error("Screen share failed", e); }
+        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+        const screenTrack = stream.getVideoTracks()[0];
+        screenTrack.onended = () => { if (isScreenSharing) toggleScreenShare(); };
+        replaceVideoTrack(screenTrack);
+        setIsScreenSharing(true);
+        setIsVideoEnabled(true);
     }
   };
   
   const isError = status.startsWith('Error:');
+  const isFailed = connectionStatus === 'failed';
+  const controlsDisabled = isError || isFailed;
 
   const getStatusIcon = () => {
-      if (isError || connectionStatus === 'failed') return <WifiSlash weight="fill" color={theme.colors.danger} />;
+      if (isError || isFailed) return <WifiSlash weight="fill" color={theme.colors.danger} />;
       if (connectionStatus === 'connected' || connectionStatus === 'completed') return <WifiHigh weight="fill" color="#22c55e" />;
       return <WarningCircle weight="fill" />;
   };
@@ -408,9 +365,9 @@ export const DirectCall: React.FC = () => {
 
         <div style={{ padding: '32px', textAlign: 'center', zIndex: 10, display: 'flex', justifyContent: 'center' }}>
             <div style={{ 
-                background: isError ? 'rgba(220, 38, 38, 0.1)' : 'rgba(255,255,255,0.05)', 
-                color: isError ? theme.colors.danger : theme.colors.text3,
-                border: `1px solid ${isError ? theme.colors.danger : 'rgba(255,255,255,0.1)'}`,
+                background: isError || isFailed ? 'rgba(220, 38, 38, 0.1)' : 'rgba(255,255,255,0.05)', 
+                color: isError || isFailed ? theme.colors.danger : theme.colors.text3,
+                border: `1px solid ${isError || isFailed ? theme.colors.danger : 'rgba(255,255,255,0.1)'}`,
                 padding: '8px 16px', borderRadius: theme.radius.full,
                 display: 'flex', alignItems: 'center', gap: '8px',
                 fontSize: '12px', backdropFilter: 'blur(10px)',
@@ -452,9 +409,9 @@ export const DirectCall: React.FC = () => {
         </div>
 
         <div style={{ padding: '48px 24px', display: 'flex', justifyContent: 'center', gap: '24px', background: 'linear-gradient(to top, #000 0%, transparent 100%)' }}>
-            <ControlButton onClick={toggleMute} active={!isMuted} icon={isMuted ? MicrophoneSlash : Microphone} disabled={isError} />
-            <ControlButton onClick={toggleVideo} active={isVideoEnabled && !isScreenSharing} icon={isVideoEnabled && !isScreenSharing ? VideoCamera : VideoCameraSlash} disabled={isError} />
-            <ControlButton onClick={toggleScreenShare} active={isScreenSharing} icon={isScreenSharing ? Screencast : DesktopTower} disabled={isError} />
+            <ControlButton onClick={toggleMute} active={!isMuted} icon={isMuted ? MicrophoneSlash : Microphone} disabled={controlsDisabled} />
+            <ControlButton onClick={toggleVideo} active={isVideoEnabled && !isScreenSharing} icon={isVideoEnabled && !isScreenSharing ? VideoCamera : VideoCameraSlash} disabled={controlsDisabled || isScreenSharing} />
+            <ControlButton onClick={toggleScreenShare} active={isScreenSharing} icon={isScreenSharing ? Screencast : DesktopTower} disabled={controlsDisabled} />
             
             <motion.button whileTap={{ scale: 0.9 }} onClick={() => { leaveCall(); navigate(-1); }}
                style={{
@@ -482,7 +439,7 @@ const RemotePeer: React.FC<{ peer: Peer, onMaximize: () => void }> = ({ peer, on
         }
     }, [peer.stream, hasStream]);
 
-    const showVideo = isVideoOn && peer.connectionState === 'connected';
+    const showVideo = isVideoOn && (peer.connection?.iceConnectionState === 'connected' || peer.connection?.iceConnectionState === 'completed');
 
     return (
         <motion.div 
@@ -503,7 +460,7 @@ const RemotePeer: React.FC<{ peer: Peer, onMaximize: () => void }> = ({ peer, on
                      <div style={{ textAlign: 'center', color: theme.colors.text2 }}>
                         <Users size={32} />
                         <div style={{ fontSize: '10px', marginTop: '4px', textTransform: 'uppercase' }}>
-                           {peer.connectionState === 'connected' ? 'Video Off' : 'Connecting...'}
+                           {peer.connection?.iceConnectionState === 'connected' ? 'Video Off' : 'Connecting...'}
                         </div>
                      </div>
                  )}
@@ -532,7 +489,8 @@ const ControlButton = ({ onClick, active, icon: Icon, disabled }: any) => (
             color: active ? '#000' : theme.colors.text1,
             border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center',
             backdropFilter: 'blur(10px)', 
-            cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.5 : 1
+            cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.5 : 1,
+            transition: 'background 0.2s, color 0.2s'
         }}
     >
         <Icon size={24} weight="fill" />

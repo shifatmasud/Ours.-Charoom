@@ -109,8 +109,10 @@ export const LiveCall: React.FC = () => {
     }, [navigate, cleanup]);
 
 
-    // --- Initialization Effect ---
+    // --- Initialization Effect with Retry Logic ---
     useEffect(() => {
+        let retryTimeoutId: number | null = null;
+        
         const init = async () => {
             try {
                 const user = await api.getCurrentUser();
@@ -120,48 +122,62 @@ export const LiveCall: React.FC = () => {
                 localStreamRef.current = stream;
                 if (localVideoRef.current) localVideoRef.current.srcObject = stream;
 
-                const peer = new Peer(user.id, { debug: 2 });
-                peerRef.current = peer;
+                const connectToPeerServer = (attempt = 1) => {
+                    if (attempt > 3) {
+                        dispatch({ type: 'SET_ERROR', payload: "Connection ID is in use. Please wait a moment and try again." });
+                        return;
+                    }
 
-                const handleCallEvents = (call: Peer.MediaConnection) => {
-                    currentCallRef.current = call;
-                    call.on('stream', (remoteStream) => {
-                        if (remoteVideoRef.current) remoteVideoRef.current.srcObject = remoteStream;
-                        dispatch({ type: 'SET_STATUS', payload: 'connected' });
+                    const peer = new Peer(user.id, { debug: 2 });
+                    peerRef.current = peer;
+
+                    const handleCallEvents = (call: Peer.MediaConnection) => {
+                        currentCallRef.current = call;
+                        call.on('stream', (remoteStream) => {
+                            if (remoteVideoRef.current) remoteVideoRef.current.srcObject = remoteStream;
+                            dispatch({ type: 'SET_STATUS', payload: 'connected' });
+                        });
+                        call.on('close', leaveCall);
+                        call.on('error', (err) => {
+                            console.error('Call error:', err);
+                            dispatch({ type: 'SET_ERROR', payload: 'Call error.' });
+                            leaveCall();
+                        });
+                    };
+
+                    peer.on('open', () => {
+                        if (friendId) {
+                            const call = peer.call(friendId, stream);
+                            handleCallEvents(call);
+                            dispatch({ type: 'SET_STATUS', payload: 'ringing' });
+                        }
                     });
-                    call.on('close', leaveCall);
-                    call.on('error', (err) => {
-                        console.error('Call error:', err);
-                        dispatch({ type: 'SET_ERROR', payload: 'Call error.' });
-                        leaveCall();
+
+                    peer.on('call', (call) => {
+                        call.answer(stream);
+                        handleCallEvents(call);
+                    });
+
+                    peer.on('error', (err: any) => {
+                        if (err.type === 'unavailable-id') {
+                            console.warn(`Peer ID ${user.id} is taken. Retrying in 1s (attempt ${attempt}).`);
+                            peer.destroy();
+                            retryTimeoutId = window.setTimeout(() => connectToPeerServer(attempt + 1), 1000);
+                        } else {
+                            let message = `Error: ${err.message}`;
+                            if (err.type === 'peer-unavailable') message = 'User is not available.';
+                            dispatch({ type: 'SET_ERROR', payload: message });
+                        }
+                    });
+
+                    peer.on('disconnected', () => {
+                        if (peerRef.current && !peerRef.current.destroyed) {
+                             peerRef.current.reconnect();
+                        }
                     });
                 };
 
-                peer.on('open', () => {
-                    if (friendId) {
-                        const call = peer.call(friendId, stream);
-                        handleCallEvents(call);
-                        dispatch({ type: 'SET_STATUS', payload: 'ringing' });
-                    }
-                });
-
-                peer.on('call', (call) => {
-                    call.answer(stream);
-                    handleCallEvents(call);
-                });
-
-                peer.on('error', (err: any) => {
-                    let message = `Error: ${err.message}`;
-                    if (err.type === 'peer-unavailable') message = 'User is not available.';
-                    if (err.type === 'unavailable-id') message = "Connection ID is taken. Please try again.";
-                    dispatch({ type: 'SET_ERROR', payload: message });
-                });
-
-                peer.on('disconnected', () => {
-                    if (peerRef.current && !peerRef.current.destroyed) {
-                         peerRef.current.reconnect();
-                    }
-                });
+                connectToPeerServer();
 
             } catch (err: any) {
                 const msg = err.name === 'NotAllowedError' ? 'Permissions denied.' : 'Media devices not found.';
@@ -170,7 +186,11 @@ export const LiveCall: React.FC = () => {
         };
 
         init();
-        return cleanup; // The one true cleanup function
+
+        return () => {
+            if (retryTimeoutId) clearTimeout(retryTimeoutId);
+            cleanup();
+        };
     }, [friendId, leaveCall, cleanup]);
 
     // --- Media Controls ---

@@ -69,7 +69,34 @@ export const LiveCall: React.FC = () => {
                     host: '0.peerjs.com', 
                     port: 443,
                     path: '/',
-                    pingInterval: 5000
+                    pingInterval: 5000,
+                    config: {
+                      iceServers: [
+                            {
+                                urls: "stun:stun.relay.metered.ca:80",
+                            },
+                            {
+                                urls: "turn:global.relay.metered.ca:80",
+                                username: "c471bbe57a75148f4bb4e9ef",
+                                credential: "cWdboQRIH0/hBLhd",
+                            },
+                            {
+                                urls: "turn:global.relay.metered.ca:80?transport=tcp",
+                                username: "c471bbe57a75148f4bb4e9ef",
+                                credential: "cWdboQRIH0/hBLhd",
+                            },
+                            {
+                                urls: "turn:global.relay.metered.ca:443",
+                                username: "c471bbe57a75148f4bb4e9ef",
+                                credential: "cWdboQRIH0/hBLhd",
+                            },
+                            {
+                                urls: "turns:global.relay.metered.ca:443?transport=tcp",
+                                username: "c471bbe57a75148f4bb4e9ef",
+                                credential: "cWdboQRIH0/hBLhd",
+                            },
+                        ],
+                    }
                 });
                 peerRef.current = peer;
 

@@ -8,7 +8,7 @@ import { MessagesList } from './components/Section/MessagesList';
 import { Profile } from './components/Page/Profile';
 import { Login } from './components/Page/Login';
 import { Activity } from './components/Page/Activity';
-import { LiveCall } from './components/Page/LiveCall';
+import { GroupCall } from './components/Page/GroupCall';
 import { PostDetail } from './components/Page/PostDetail';
 import { theme } from './Theme';
 import { ThemeProvider } from './ThemeContext';
@@ -17,6 +17,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Loader } from './components/Core/Loader';
 import { api, supabase } from './services/supabaseClient';
 import { DS } from './Theme';
+import { LiveCall } from './components/Page/LiveCall';
 
 // --- Auth Guard ---
 const RequireAuth = ({ children }: { children?: React.ReactNode }) => {
@@ -38,23 +39,19 @@ const AnimatedRoutes = () => {
 
   return (
     <AnimatePresence mode="wait">
-      {/* FIX: The Routes component does not accept a 'key' prop, which is needed by AnimatePresence.
-          Wrapping Routes in a motion.div with the key resolves the TypeScript error and
-          allows framer-motion to correctly animate route transitions. */}
-      <motion.div key={location.pathname}>
-        <Routes location={location}>
-          <Route path="/login" element={<Login />} />
-          
-          {/* Protected Routes */}
-          <Route path="/" element={<RequireAuth><Feed /></RequireAuth>} />
-          <Route path="/profile/:userId" element={<RequireAuth><Profile /></RequireAuth>} />
-          <Route path="/post/:postId" element={<RequireAuth><PostDetail /></RequireAuth>} />
-          <Route path="/messages" element={<RequireAuth><MessagesList /></RequireAuth>} />
-          <Route path="/messages/:friendId" element={<RequireAuth><ChatWindow /></RequireAuth>} />
-          <Route path="/call/:friendId" element={<RequireAuth><LiveCall /></RequireAuth>} />
-          <Route path="/activity" element={<RequireAuth><Activity /></RequireAuth>} />
-        </Routes>
-      </motion.div>
+      <Routes location={location} key={location.pathname}>
+        <Route path="/login" element={<Login />} />
+        
+        {/* Protected Routes */}
+        <Route path="/" element={<RequireAuth><Feed /></RequireAuth>} />
+        <Route path="/profile/:userId" element={<RequireAuth><Profile /></RequireAuth>} />
+        <Route path="/post/:postId" element={<RequireAuth><PostDetail /></RequireAuth>} />
+        <Route path="/messages" element={<RequireAuth><MessagesList /></RequireAuth>} />
+        <Route path="/messages/:friendId" element={<RequireAuth><ChatWindow /></RequireAuth>} />
+        <Route path="/call/:roomId" element={<RequireAuth><GroupCall /></RequireAuth>} />
+        <Route path="/live" element={<RequireAuth><LiveCall /></RequireAuth>} />
+        <Route path="/activity" element={<RequireAuth><Activity /></RequireAuth>} />
+      </Routes>
     </AnimatePresence>
   );
 };

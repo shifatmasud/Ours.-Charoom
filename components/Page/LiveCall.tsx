@@ -1,352 +1,298 @@
-import React, { useEffect, useState, useRef, useCallback, useReducer } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import Peer from 'peerjs';
-import { motion } from 'framer-motion';
-import { Microphone, MicrophoneSlash, PhoneDisconnect, VideoCamera, VideoCameraSlash, WifiHigh, WifiSlash, Users, Screencast } from '@phosphor-icons/react';
-import { theme, commonStyles, DS } from '../../Theme';
-import { api } from '../../services/supabaseClient';
-import { CurrentUser } from '../../types';
 
-const isScreenShareSupported = !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
+import React, { useEffect, useState, useRef } from 'react';
+import { GoogleGenAI, LiveServerMessage, Modality, Blob } from '@google/genai';
+import { motion, AnimatePresence } from 'framer-motion';
+import { theme, commonStyles } from '../../Theme';
+import { Microphone, MicrophoneSlash, X, PhoneCall } from '@phosphor-icons/react';
+import { useNavigate } from 'react-router-dom';
 
-// --- State Management with Reducer for predictable states ---
-type CallState = {
-  status: 'initializing' | 'ringing' | 'connected' | 'error' | 'ended';
-  error?: string;
-  isMuted: boolean;
-  isVideoEnabled: boolean;
-  isScreenSharing: boolean;
-};
-
-type Action =
-  | { type: 'SET_STATUS'; payload: CallState['status'] }
-  | { type: 'SET_ERROR'; payload: string }
-  | { type: 'TOGGLE_MUTE' }
-  | { type: 'TOGGLE_VIDEO' }
-  | { type: 'TOGGLE_SCREEN_SHARE'; payload: boolean }
-  | { type: 'RESET' };
-
-const initialState: CallState = {
-  status: 'initializing',
-  isMuted: false,
-  isVideoEnabled: true,
-  isScreenSharing: false,
-};
-
-function callReducer(state: CallState, action: Action): CallState {
-  switch (action.type) {
-    case 'SET_STATUS':
-      return { ...state, status: action.payload, error: undefined };
-    case 'SET_ERROR':
-      return { ...state, status: 'error', error: action.payload };
-    case 'TOGGLE_MUTE':
-      return { ...state, isMuted: !state.isMuted };
-    case 'TOGGLE_VIDEO':
-      return { ...state, isVideoEnabled: !state.isVideoEnabled };
-    case 'TOGGLE_SCREEN_SHARE':
-      return { ...state, isScreenSharing: action.payload };
-    case 'RESET':
-      return initialState;
-    default:
-      return state;
+// --- Helper Functions for Audio ---
+function createBlob(data: Float32Array): Blob {
+  const l = data.length;
+  const int16 = new Int16Array(l);
+  for (let i = 0; i < l; i++) {
+    // Simple float to int16 conversion
+    int16[i] = Math.max(-1, Math.min(1, data[i])) * 32767;
   }
+  return {
+    data: encode(new Uint8Array(int16.buffer)),
+    mimeType: 'audio/pcm;rate=16000',
+  };
 }
 
-const getStatusMessage = (state: CallState) => {
-    switch(state.status) {
-        case 'initializing': return 'Initializing...';
-        case 'ringing': return 'Ringing...';
-        case 'connected': return 'Connected';
-        case 'ended': return 'Call ended.';
-        case 'error': return state.error || 'An error occurred.';
+function encode(bytes: Uint8Array) {
+  let binary = '';
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
+function decode(base64: string) {
+  const binaryString = atob(base64);
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes;
+}
+
+async function decodeAudioData(
+  data: Uint8Array,
+  ctx: AudioContext,
+  sampleRate: number,
+  numChannels: number,
+): Promise<AudioBuffer> {
+  const dataInt16 = new Int16Array(data.buffer);
+  const frameCount = dataInt16.length / numChannels;
+  const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
+
+  for (let channel = 0; channel < numChannels; channel++) {
+    const channelData = buffer.getChannelData(channel);
+    for (let i = 0; i < frameCount; i++) {
+      channelData[i] = dataInt16[i * numChannels + channel] / 32768.0;
     }
+  }
+  return buffer;
 }
 
 export const LiveCall: React.FC = () => {
-    const { friendId } = useParams<{ friendId: string }>();
-    const navigate = useNavigate();
+  const navigate = useNavigate();
+  const [isConnected, setIsConnected] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false); // Visual indicator for AI speaking
+  const [error, setError] = useState<string | null>(null);
 
-    const [state, dispatch] = useReducer(callReducer, initialState);
-    const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
-    
-    const peerRef = useRef<Peer | null>(null);
-    const localStreamRef = useRef<MediaStream | null>(null);
-    const screenStreamRef = useRef<MediaStream | null>(null);
-    const currentCallRef = useRef<Peer.MediaConnection | null>(null);
+  // Refs for Audio Contexts and Session
+  const inputContextRef = useRef<AudioContext | null>(null);
+  const outputContextRef = useRef<AudioContext | null>(null);
+  const nextStartTimeRef = useRef<number>(0);
+  const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
+  // Track the active session to ensure we only close the one we created
+  const sessionRef = useRef<any>(null);
 
-    const localVideoRef = useRef<HTMLVideoElement>(null);
-    const remoteVideoRef = useRef<HTMLVideoElement>(null);
-    const isScreenSharingRef = useRef(state.isScreenSharing);
+  useEffect(() => {
+    let active = true;
+    let currentSession: any = null;
 
-    useEffect(() => {
-        isScreenSharingRef.current = state.isScreenSharing;
-    }, [state.isScreenSharing]);
-
-    // --- Core Cleanup Function ---
-    const cleanup = useCallback(() => {
-        dispatch({ type: 'SET_STATUS', payload: 'ended' });
-
-        localStreamRef.current?.getTracks().forEach(track => track.stop());
-        screenStreamRef.current?.getTracks().forEach(track => track.stop());
-
-        if (localVideoRef.current) localVideoRef.current.srcObject = null;
-        if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
-
-        currentCallRef.current?.close();
-        if (peerRef.current && !peerRef.current.destroyed) {
-            peerRef.current.destroy();
-        }
-
-        localStreamRef.current = null;
-        screenStreamRef.current = null;
-        currentCallRef.current = null;
-        peerRef.current = null;
-    }, []);
-
-    const leaveCall = useCallback(() => {
-        cleanup();
-        navigate(-1);
-    }, [navigate, cleanup]);
-
-
-    // --- Initialization Effect with Retry Logic ---
-    useEffect(() => {
-        let retryTimeoutId: number | null = null;
+    const startSession = async () => {
+      try {
+        if (!process.env.API_KEY) throw new Error("API Key missing");
         
-        const init = async () => {
-            try {
-                const user = await api.getCurrentUser();
-                setCurrentUser(user);
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+        
+        // 1. Setup Audio Contexts
+        // Close existing if any (cleanup safety)
+        if (inputContextRef.current) inputContextRef.current.close();
+        if (outputContextRef.current) outputContextRef.current.close();
 
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
-                localStreamRef.current = stream;
-                if (localVideoRef.current) localVideoRef.current.srcObject = stream;
+        const inputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+        const outputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+        
+        inputContextRef.current = inputCtx;
+        outputContextRef.current = outputCtx;
 
-                const connectToPeerServer = (attempt = 1) => {
-                    if (attempt > 3) {
-                        dispatch({ type: 'SET_ERROR', payload: "Connection ID is in use. Please wait a moment and try again." });
-                        return;
-                    }
-
-                    const peer = new Peer(user.id, { debug: 2 });
-                    peerRef.current = peer;
-
-                    const handleCallEvents = (call: Peer.MediaConnection) => {
-                        currentCallRef.current = call;
-                        call.on('stream', (remoteStream) => {
-                            if (remoteVideoRef.current) remoteVideoRef.current.srcObject = remoteStream;
-                            dispatch({ type: 'SET_STATUS', payload: 'connected' });
-                        });
-                        call.on('close', leaveCall);
-                        call.on('error', (err) => {
-                            console.error('Call error:', err);
-                            dispatch({ type: 'SET_ERROR', payload: 'Call error.' });
-                            leaveCall();
-                        });
-                    };
-
-                    peer.on('open', () => {
-                        if (friendId) {
-                            const call = peer.call(friendId, stream);
-                            handleCallEvents(call);
-                            dispatch({ type: 'SET_STATUS', payload: 'ringing' });
-                        }
-                    });
-
-                    peer.on('call', (call) => {
-                        call.answer(stream);
-                        handleCallEvents(call);
-                    });
-
-                    peer.on('error', (err: any) => {
-                        if (err.type === 'unavailable-id') {
-                            console.warn(`Peer ID ${user.id} is taken. Retrying in 1s (attempt ${attempt}).`);
-                            peer.destroy();
-                            retryTimeoutId = window.setTimeout(() => connectToPeerServer(attempt + 1), 1000);
-                        } else {
-                            let message = `Error: ${err.message}`;
-                            if (err.type === 'peer-unavailable') message = 'User is not available.';
-                            dispatch({ type: 'SET_ERROR', payload: message });
-                        }
-                    });
-
-                    peer.on('disconnected', () => {
-                        if (peerRef.current && !peerRef.current.destroyed) {
-                             peerRef.current.reconnect();
-                        }
-                    });
+        // 2. Connect to Gemini Live
+        const sessionPromise = ai.live.connect({
+          model: 'gemini-2.5-flash-native-audio-preview-09-2025',
+          callbacks: {
+            onopen: async () => {
+              if (!active) return;
+              setIsConnected(true);
+              
+              // Start Microphone Stream
+              try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const source = inputCtx.createMediaStreamSource(stream);
+                const scriptProcessor = inputCtx.createScriptProcessor(4096, 1, 1);
+                
+                scriptProcessor.onaudioprocess = (e) => {
+                  if (!active || isMuted || !currentSession) return;
+                  const inputData = e.inputBuffer.getChannelData(0);
+                  const pcmBlob = createBlob(inputData);
+                  currentSession.sendRealtimeInput({ media: pcmBlob });
                 };
-
-                connectToPeerServer();
-
-            } catch (err: any) {
-                const msg = err.name === 'NotAllowedError' ? 'Permissions denied.' : 'Media devices not found.';
-                dispatch({ type: 'SET_ERROR', payload: msg });
-            }
-        };
-
-        init();
-
-        return () => {
-            if (retryTimeoutId) clearTimeout(retryTimeoutId);
-            cleanup();
-        };
-    }, [friendId, leaveCall, cleanup]);
-
-    // --- Media Controls ---
-    const toggleMute = () => {
-        localStreamRef.current?.getAudioTracks().forEach(t => t.enabled = state.isMuted);
-        dispatch({ type: 'TOGGLE_MUTE' });
-    };
-
-    const toggleVideo = () => {
-        if (state.isScreenSharing) return;
-        localStreamRef.current?.getVideoTracks().forEach(t => t.enabled = state.isVideoEnabled);
-        dispatch({ type: 'TOGGLE_VIDEO' });
-    };
-
-    const toggleScreenShare = async () => {
-        const call = currentCallRef.current;
-        if (!call) return;
-
-        const videoSender = call.peerConnection.getSenders().find(s => s.track?.kind === 'video');
-        if (!videoSender) return dispatch({ type: 'SET_ERROR', payload: "Could not share screen." });
-
-        if (isScreenSharingRef.current) {
-            const cameraTrack = localStreamRef.current?.getVideoTracks()[0];
-            if (cameraTrack) {
-                await videoSender.replaceTrack(cameraTrack);
-                screenStreamRef.current?.getTracks().forEach(track => track.stop());
-                screenStreamRef.current = null;
-                cameraTrack.enabled = state.isVideoEnabled;
-                dispatch({ type: 'TOGGLE_SCREEN_SHARE', payload: false });
-            }
-        } else {
-            try {
-                const displayStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-                const screenTrack = displayStream.getVideoTracks()[0];
-                screenStreamRef.current = displayStream;
-
-                const cameraTrack = localStreamRef.current?.getVideoTracks()[0];
-                if (cameraTrack) cameraTrack.enabled = false;
                 
-                await videoSender.replaceTrack(screenTrack);
-                dispatch({ type: 'TOGGLE_SCREEN_SHARE', payload: true });
+                source.connect(scriptProcessor);
+                scriptProcessor.connect(inputCtx.destination);
+              } catch (err) {
+                console.error(err);
+                if (active) setError("Microphone access denied.");
+              }
+            },
+            onmessage: async (message: LiveServerMessage) => {
+              if (!active) return;
+              
+              // Handle Audio Output
+              const base64Audio = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
+              if (base64Audio) {
+                setIsSpeaking(true);
+                // Reset speaking visual after a bit if no more chunks come
+                setTimeout(() => { if(active) setIsSpeaking(false); }, 400); 
 
-                screenTrack.onended = () => {
-                    if (isScreenSharingRef.current && cameraTrack) {
-                        videoSender.replaceTrack(cameraTrack);
-                        dispatch({ type: 'TOGGLE_SCREEN_SHARE', payload: false });
-                        cameraTrack.enabled = state.isVideoEnabled;
-                    }
+                const audioCtx = outputContextRef.current;
+                if (!audioCtx || audioCtx.state === 'closed') return;
+
+                nextStartTimeRef.current = Math.max(nextStartTimeRef.current, audioCtx.currentTime);
+                
+                const audioBuffer = await decodeAudioData(
+                  decode(base64Audio),
+                  audioCtx,
+                  24000,
+                  1
+                );
+                
+                const source = audioCtx.createBufferSource();
+                source.buffer = audioBuffer;
+                source.connect(audioCtx.destination);
+                source.onended = () => {
+                   sourcesRef.current.delete(source);
                 };
-            } catch (err) {
-                dispatch({ type: 'SET_ERROR', payload: "Screen share cancelled." });
+                source.start(nextStartTimeRef.current);
+                nextStartTimeRef.current += audioBuffer.duration;
+                sourcesRef.current.add(source);
+              }
+
+              // Handle Interruptions
+              if (message.serverContent?.interrupted) {
+                sourcesRef.current.forEach(src => {
+                    try { src.stop(); } catch(e) {}
+                });
+                sourcesRef.current.clear();
+                nextStartTimeRef.current = 0;
+                setIsSpeaking(false);
+              }
+            },
+            onclose: () => {
+              if(active) {
+                  console.log("Session closed");
+                  setIsConnected(false);
+              }
+            },
+            onerror: (err) => {
+              console.error("Session error", err);
+              if(active) setError("Connection error.");
             }
-        }
+          },
+          config: {
+            responseModalities: [Modality.AUDIO],
+            speechConfig: {
+              voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } }
+            },
+            systemInstruction: "You are a helpful, chill AI assistant in a social media app called 'Ours'. Keep responses concise and conversational."
+          }
+        });
+
+        // Store session when resolved
+        sessionPromise.then(sess => {
+          if (!active) {
+            // If we were cancelled before connection finished, close immediately
+            sess.close();
+            return;
+          }
+          currentSession = sess;
+          sessionRef.current = sess;
+        });
+
+      } catch (e) {
+        console.error(e);
+        if(active) setError("Failed to initialize.");
+      }
     };
-    
-    const getStatusIcon = () => {
-        if (state.status === 'error') return <WifiSlash weight="fill" color={DS.Color.Status.Error} />;
-        if (state.status === 'connected') return <WifiHigh weight="fill" color="#22c55e" />;
-        return <Users weight="thin" />;
+
+    startSession();
+
+    return () => {
+      active = false;
+      // Cleanup contexts
+      if (inputContextRef.current && inputContextRef.current.state !== 'closed') inputContextRef.current.close();
+      if (outputContextRef.current && outputContextRef.current.state !== 'closed') outputContextRef.current.close();
+      
+      // Robust Session Cleanup
+      if (sessionRef.current) {
+        try { sessionRef.current.close(); } catch(e) { console.log("Session close err", e); }
+        sessionRef.current = null;
+      }
+      
+      sourcesRef.current.forEach(src => {
+         try { src.stop(); } catch(e) {}
+      });
+      sourcesRef.current.clear();
     };
+  }, [isMuted]); 
 
-    const statusText = getStatusMessage(state);
-    const callEstablished = state.status === 'connected';
+  const handleEndCall = () => {
+    navigate(-1); // Cleanup happens in useEffect unmount
+  };
 
-    return (
-        <motion.div
-          {...theme.motion.page}
-          style={{ 
-            ...commonStyles.pageContainer, background: '#000', 
-            position: 'fixed', inset: 0, zIndex: 2000,
-            flexDirection: 'column', justifyContent: 'space-between', overflow: 'hidden'
-          }}
-        >
-            <div style={{ padding: '32px', zIndex: 10, display: 'flex', justifyContent: 'center' }}>
-                <div style={{ 
-                    background: state.status === 'error' ? 'rgba(220, 38, 38, 0.1)' : 'rgba(255,255,255,0.05)', 
-                    color: state.status === 'error' ? DS.Color.Status.Error : DS.Color.Base.Content[3],
-                    border: `1px solid ${state.status === 'error' ? DS.Color.Status.Error : 'rgba(255,255,255,0.1)'}`,
-                    padding: '8px 16px', borderRadius: DS.Radius.Full, display: 'flex', alignItems: 'center', gap: '8px',
-                    fontSize: '12px', backdropFilter: 'blur(10px)',
-                }}>
-                    {getStatusIcon()} {statusText}
-                </div>
-            </div>
+  return (
+    <div style={{ 
+      ...commonStyles.pageContainer, 
+      background: '#000', 
+      position: 'fixed', inset: 0, zIndex: 2000 
+    }}>
+      
+      {/* Visualizer Orb */}
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: '40px' }}>
+        
+        <div style={{ position: 'relative', width: '200px', height: '200px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            {/* Outer Glow */}
+            <motion.div 
+               animate={{ 
+                 scale: isSpeaking ? [1, 1.5, 1] : [1, 1.1, 1],
+                 opacity: isSpeaking ? 0.8 : 0.3
+               }}
+               transition={{ duration: isSpeaking ? 0.5 : 2, repeat: Infinity, ease: "easeInOut" }}
+               style={{ 
+                 position: 'absolute', inset: 0, borderRadius: '50%', 
+                 background: `radial-gradient(circle, ${theme.colors.accent} 0%, transparent 70%)` 
+               }}
+            />
+            {/* Core */}
+            <div style={{ width: '80px', height: '80px', borderRadius: '50%', background: '#fff', boxShadow: `0 0 40px ${theme.colors.accent}` }} />
+        </div>
 
-            <div style={{ flex: 1, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <video ref={remoteVideoRef} autoPlay playsInline style={{ 
-                    position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover',
-                    transition: 'opacity 0.5s ease', opacity: callEstablished ? 1 : 0
-                }} />
-                
-                {!callEstablished && state.status !== 'error' && (
-                    <div style={{ ...commonStyles.flexCenter, flexDirection: 'column', gap: '16px', color: DS.Color.Base.Content[2] }}>
-                        <Users size={48} weight="thin" />
-                        <p style={{ fontSize: '14px' }}>Waiting for connection...</p>
-                    </div>
-                )}
-                
-                <motion.div 
-                    drag dragConstraints={{ top: -200, left: -200, right: 200, bottom: 200 }}
-                    style={{
-                        position: 'absolute', bottom: '140px', right: '24px',
-                        width: '120px', height: '180px', borderRadius: '16px',
-                        background: DS.Color.Base.Surface[3], overflow: 'hidden',
-                        border: `2px solid ${state.isScreenSharing ? DS.Color.Accent.Surface : 'rgba(255,255,255,0.2)'}`,
-                        boxShadow: '0 8px 24px rgba(0,0,0,0.5)', cursor: 'grab', transition: 'border 0.3s'
-                    }} 
-                >
-                    <video ref={localVideoRef} autoPlay muted playsInline style={{
-                        width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)',
-                        display: state.isVideoEnabled ? 'block' : 'none'
-                    }} />
-                    {!state.isVideoEnabled && (
-                        <div style={{ ...commonStyles.flexCenter, width: '100%', height: '100%', background: '#000' }}>
-                            <span style={{ fontSize: '32px', color: 'white' }}>{currentUser?.username?.charAt(0).toUpperCase()}</span>
-                        </div>
-                    )}
-                </motion.div>
-            </div>
-            
-            <div style={{ padding: '48px 24px', display: 'flex', justifyContent: 'center', gap: '24px', background: 'linear-gradient(to top, #000 0%, transparent 100%)', zIndex: 10 }}>
-                <ControlButton onClick={toggleMute} active={!state.isMuted} icon={state.isMuted ? MicrophoneSlash : Microphone} />
-                <ControlButton onClick={toggleVideo} active={state.isVideoEnabled && !state.isScreenSharing} disabled={state.isScreenSharing} icon={state.isVideoEnabled ? VideoCamera : VideoCameraSlash} />
-                {isScreenShareSupported && <ControlButton onClick={toggleScreenShare} active={state.isScreenSharing} icon={Screencast} activeColor={DS.Color.Accent.Surface} />}
-                
-                <motion.button whileTap={{ scale: 0.9 }} onClick={leaveCall}
-                   style={{
-                       width: '64px', height: '64px', borderRadius: '50%',
-                       background: DS.Color.Status.Error, color: '#fff', border: 'none', 
-                       display: 'flex', alignItems: 'center', justifyContent: 'center',
-                       boxShadow: `0 0 20px rgba(255, 51, 0, 0.4)`, cursor: 'pointer'
-                   }}
-                >
-                    <PhoneDisconnect size={28} weight="fill" />
-                </motion.button>
-            </div>
-        </motion.div>
-    );
+        <div style={{ textAlign: 'center' }}>
+            <h2 style={{ color: '#fff', marginBottom: '8px', letterSpacing: '1px' }}>Voice Call</h2>
+            <p style={{ color: theme.colors.text2 }}>{isConnected ? (isSpeaking ? "Speaking..." : "Listening...") : "Connecting..."}</p>
+            {error && <p style={{ color: theme.colors.danger, marginTop: '8px' }}>{error}</p>}
+        </div>
+      
+      </div>
+
+      {/* Controls */}
+      <div style={{ padding: '48px', display: 'flex', gap: '32px', alignItems: 'center', justifyContent: 'center' }}>
+         <motion.button
+           whileTap={{ scale: 0.9 }}
+           onClick={() => setIsMuted(!isMuted)}
+           style={{ 
+             width: '60px', height: '60px', borderRadius: '50%', 
+             background: isMuted ? '#fff' : 'rgba(255,255,255,0.1)', 
+             color: isMuted ? '#000' : '#fff',
+             border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center',
+             cursor: 'pointer'
+           }}
+         >
+            {isMuted ? <MicrophoneSlash size={24} weight="fill" /> : <Microphone size={24} weight="fill" />}
+         </motion.button>
+
+         <motion.button
+           whileTap={{ scale: 0.9 }}
+           onClick={handleEndCall}
+           style={{ 
+             width: '72px', height: '72px', borderRadius: '50%', 
+             background: theme.colors.danger, 
+             color: '#fff',
+             border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center',
+             cursor: 'pointer'
+           }}
+         >
+            <X size={32} weight="bold" />
+         </motion.button>
+      </div>
+
+    </div>
+  );
 };
-
-const ControlButton: React.FC<{ onClick: () => void; active: boolean; icon: React.ElementType; disabled?: boolean; activeColor?: string }> = ({ onClick, active, icon: Icon, disabled, activeColor }) => (
-    <motion.button
-        whileTap={!disabled ? { scale: 0.9 } : {}}
-        onClick={onClick}
-        disabled={disabled}
-        style={{
-            width: '64px', height: '64px', borderRadius: '50%',
-            background: active ? (activeColor || DS.Color.Base.Content[1]) : 'rgba(255,255,255,0.1)',
-            color: active ? (activeColor ? '#fff' : '#000') : DS.Color.Base.Content[1],
-            border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center',
-            backdropFilter: 'blur(10px)',
-            cursor: disabled ? 'not-allowed' : 'pointer',
-            transition: 'background 0.2s, color 0.2s, opacity 0.2s',
-            opacity: disabled ? 0.5 : 1
-        }}
-    >
-        <Icon size={24} weight="fill" />
-    </motion.button>
-);

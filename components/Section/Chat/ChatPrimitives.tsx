@@ -12,17 +12,14 @@ import { AudioPlayer } from '../../Core/AudioPlayer';
 export const ChatHeader: React.FC<{
     title: string;
     onCall?: () => void;
-}> = ({ title, onCall }) => {
+    isCodex?: boolean;
+}> = ({ title, onCall, isCodex }) => {
     return (
       <div style={{ 
-        padding: '24px 24px 16px 24px', 
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        position: 'sticky',
-        top: 0,
-        zIndex: 50,
-        background: `linear-gradient(to bottom, ${theme.colors.surface1} 80%, transparent 100%)`,
-        backdropFilter: 'blur(12px)',
-        WebkitBackdropFilter: 'blur(12px)',
+        padding: '24px', 
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', 
+        background: 'transparent',
+        zIndex: 10,
         flexShrink: 0
       }}>
         <Link to="/messages" style={{ color: theme.colors.text1, display: 'flex', alignItems: 'center', gap: '8px', textDecoration: 'none' }}>
@@ -34,7 +31,7 @@ export const ChatHeader: React.FC<{
              <motion.span 
                initial={{ opacity: 0, x: 20 }}
                animate={{ opacity: 1, x: 0 }}
-               style={{ fontWeight: 600, fontSize: '16px', color: theme.colors.text1 }}
+               style={{ fontWeight: 600, fontSize: '16px', color: isCodex ? DS.Color.Accent.Surface : theme.colors.text1 }}
               >
                  {title}
              </motion.span>
@@ -127,7 +124,7 @@ export const ChatInput: React.FC<{
     
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const audioChunksRef = useRef<Blob[]>([]);
-    const fileInputRef = useRef<HTMLInputElement | null>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
     const timerRef = useRef<number | null>(null);
 
     const handleSendText = async () => {

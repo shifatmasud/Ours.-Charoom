@@ -1,5 +1,4 @@
 
-
 import { createClient } from '@supabase/supabase-js';
 import { Post, Message, Notification, Profile, CurrentUser, Comment } from '../types';
 
@@ -325,7 +324,7 @@ export const api = {
       return parseMessageContent(data);
   },
 
-  sendMessage: async (senderId: string, receiverId: string, content: string, type: 'text' | 'image' | 'audio' = 'text', mediaUrl?: string): Promise<Message> => {
+  sendMessage: async (senderId: string, receiverId: string, content: string, type: 'text' | 'image' | 'audio' = 'text', mediaUrl?: string): Promise<void> => {
       // Pack rich data into 'content' if it's not plain text, to support restricted schema
       let finalContent = content;
       if (type !== 'text' || mediaUrl) {
@@ -336,14 +335,13 @@ export const api = {
           });
       }
 
-      const { data, error } = await supabase.from('messages').insert({ 
+      const { error } = await supabase.from('messages').insert({ 
           sender_id: senderId, 
           receiver_id: receiverId, 
           content: finalContent 
-      }).select().single();
+      });
       
       if (error) throw error;
-      return parseMessageContent(data);
   },
 
   // --- Storage ---

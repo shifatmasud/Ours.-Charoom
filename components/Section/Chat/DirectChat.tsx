@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, supabase, parseMessageContent } from '../../../services/supabaseClient';
@@ -49,12 +48,13 @@ export const DirectChat: React.FC<DirectChatProps> = ({ friendId }) => {
             // Subscribe to DM updates
             channel = supabase.channel(`dm:${user.id}:${friendId}`)
                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, payload => {
-                   const msg = parseMessageContent(payload.new);
+                   const msgRaw = payload.new;
+                   const msg = parseMessageContent(msgRaw);
                    
-                   // REALTIME: Only add messages from the OTHER user. Own messages are handled optimistically.
+                   // Only add incoming messages from the friend. My own messages are added optimistically.
                    if (msg.sender_id === friendId && msg.receiver_id === user.id) {
                         setMessages(prev => {
-                           // Prevent duplicates from any stray events
+                           // Still good to keep the duplicate check for other race conditions
                            if (prev.find(m => m.id === msg.id)) return prev;
                            return [...prev, msg];
                         });
@@ -73,8 +73,8 @@ export const DirectChat: React.FC<DirectChatProps> = ({ friendId }) => {
     const handleSend = async (content: string, type: 'text'|'image'|'audio' = 'text', mediaUrl?: string) => {
         if (!currentUser) return;
         
-        // Optimistic UI Update with a unique temporary ID
-        const tempId = `local_${Date.now()}`;
+        // Optimistic UI Update with local ID
+        const tempId = `local_${Date.now()}_${Math.random()}`;
         const optimisticMsg: Message = {
             id: tempId,
             sender_id: currentUser.id,
@@ -87,20 +87,16 @@ export const DirectChat: React.FC<DirectChatProps> = ({ friendId }) => {
         setMessages(prev => [...prev, optimisticMsg]);
 
         try {
-            const savedMessage = await api.sendMessage(currentUser.id, friendId, content, type, mediaUrl);
-            // Replace the optimistic message with the real one from the server
-            setMessages(prev => prev.map(m => m.id === tempId ? savedMessage : m));
+            await api.sendMessage(currentUser.id, friendId, content, type, mediaUrl);
         } catch (e) {
             console.error("Send failed", e);
-            // On failure, remove the optimistic message to indicate it wasn't sent
-            setMessages(prev => prev.filter(m => m.id !== tempId));
         }
     };
 
     const startCall = () => {
         if (!currentUser) return;
-        // Navigate to the serverless PeerJS call component, using the friend's ID directly.
-        navigate(`/call/${friendId}`);
+        const roomId = [currentUser.id, friendId].sort().join('-');
+        navigate(`/call/${roomId}`);
     };
 
     return (

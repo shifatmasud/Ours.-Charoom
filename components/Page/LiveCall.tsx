@@ -36,44 +36,26 @@ export const LiveCall: React.FC = () => {
     }, [isScreenSharing]);
 
     const leaveCall = useCallback(() => {
-        setStatus('Call ended.');
-        // Stop all tracks
-        localStreamRef.current?.getTracks().forEach(track => track.stop());
-        screenStreamRef.current?.getTracks().forEach(track => track.stop());
-        
-        // Close call and destroy peer
-        currentCallRef.current?.close();
-        if (peerRef.current && !peerRef.current.destroyed) {
-            peerRef.current.destroy();
-        }
-        
-        // Nullify refs
-        localStreamRef.current = null;
-        screenStreamRef.current = null;
-        currentCallRef.current = null;
-        peerRef.current = null;
-
         navigate(-1);
     }, [navigate]);
 
     useEffect(() => {
-        let isMounted = true;
+        let peer: Peer | null = null;
+        let localStream: MediaStream | null = null;
         
         const init = async () => {
             try {
                 const user = await api.getCurrentUser();
-                if (!isMounted) return;
                 setCurrentUser(user);
 
                 setStatus('Requesting permissions...');
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
-                if (!isMounted) { stream.getTracks().forEach(t => t.stop()); return; }
-                
+                localStream = stream; // Capture stream for cleanup
                 localStreamRef.current = stream;
                 if (localVideoRef.current) localVideoRef.current.srcObject = stream;
 
                 setStatus('Connecting to network...');
-                const peer = new Peer(user.id, {
+                peer = new Peer(user.id, {
                     // Using PeerJS's default cloud server. For production, a self-hosted server is recommended.
                 });
                 peerRef.current = peer;
@@ -94,16 +76,14 @@ export const LiveCall: React.FC = () => {
                 }
 
                 peer.on('open', (id) => {
-                    if (!isMounted) return;
                     setStatus('Ringing...');
                     if (friendId) {
-                        const call = peer.call(friendId, stream);
+                        const call = peer!.call(friendId, stream);
                         handleCallEvents(call);
                     }
                 });
 
                 peer.on('call', (call) => {
-                    if (!isMounted) return;
                     setStatus('Incoming call...');
                     call.answer(stream);
                     handleCallEvents(call);
@@ -115,14 +95,13 @@ export const LiveCall: React.FC = () => {
                     if (err.type === 'peer-unavailable') {
                         message = 'User is not available.';
                     } else if (err.type === 'unavailable-id') {
-                        message = "Connection ID is taken. Please wait a moment.";
+                        message = "Connection ID is taken. Please try again shortly.";
                     }
                     setStatus(message);
                     setCallEstablished(false);
                 });
                 
                 peer.on('disconnected', () => {
-                    if (!isMounted) return;
                     setStatus('Reconnecting network...');
                     if (peerRef.current && !peerRef.current.destroyed) {
                          peerRef.current.reconnect();
@@ -130,7 +109,6 @@ export const LiveCall: React.FC = () => {
                 });
 
             } catch (err: any) {
-                if (!isMounted) return;
                 const msg = err.name === 'NotAllowedError' ? 'Permissions denied.' : 'Media devices not found.';
                 setStatus(`Error: ${msg}`);
             }
@@ -138,15 +116,28 @@ export const LiveCall: React.FC = () => {
 
         init();
         
-        // This is a more comprehensive cleanup
+        // This is the single source of truth for all cleanup.
         return () => {
-            isMounted = false;
+            localStream?.getTracks().forEach(track => track.stop());
             localStreamRef.current?.getTracks().forEach(track => track.stop());
             screenStreamRef.current?.getTracks().forEach(track => track.stop());
+            
+            if (localVideoRef.current) localVideoRef.current.srcObject = null;
+            if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
+
             currentCallRef.current?.close();
+            
+            if (peer && !peer.destroyed) {
+                peer.destroy();
+            }
             if (peerRef.current && !peerRef.current.destroyed) {
                 peerRef.current.destroy();
             }
+
+            localStreamRef.current = null;
+            screenStreamRef.current = null;
+            currentCallRef.current = null;
+            peerRef.current = null;
         };
     }, [friendId, leaveCall]);
 
@@ -191,21 +182,15 @@ export const LiveCall: React.FC = () => {
             try {
                 const displayStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
                 const screenTrack = displayStream.getVideoTracks()[0];
-                
-                // If there's an audio track from screen share, you can handle it here if desired
-                
                 screenStreamRef.current = displayStream;
 
                 const cameraTrack = localStreamRef.current?.getVideoTracks()[0];
-                if (cameraTrack) {
-                    cameraTrack.enabled = false;
-                }
+                if (cameraTrack) cameraTrack.enabled = false;
                 
                 await videoSender.replaceTrack(screenTrack);
                 setIsScreenSharing(true);
 
                 screenTrack.onended = () => {
-                     // Fired when user stops sharing from browser UI
                     if (isScreenSharingRef.current && cameraTrack) {
                         videoSender.replaceTrack(cameraTrack);
                         screenStreamRef.current?.getTracks().forEach(track => track.stop());

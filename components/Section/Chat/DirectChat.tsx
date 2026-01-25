@@ -115,7 +115,7 @@ export const DirectChat: React.FC<DirectChatProps> = ({ friendId }) => {
             >
                 <ChatHeader title={friendProfile?.username || 'Chat'} onCall={startCall} />
                 
-                <div className="scrollbar-hide" style={{ flex: 1, overflowY: 'auto', padding: '0 24px 100px 24px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div className="scrollbar-hide" style={{ flex: 1, overflowY: 'auto', padding: '0 24px 80px 24px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
                     {messages.length === 0 && (
                        <div style={{ height: '100%', ...commonStyles.flexCenter, flexDirection: 'column', opacity: 0.3, gap: '16px' }}>
                           <div style={{ width: '40px', height: '40px', borderRadius: '50%', border: `1px solid ${theme.colors.text3}` }}></div>

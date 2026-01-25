@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Peer from 'peerjs';
 import { motion } from 'framer-motion';
@@ -6,6 +6,9 @@ import { Microphone, MicrophoneSlash, PhoneDisconnect, VideoCamera, VideoCameraS
 import { theme, commonStyles, DS } from '../../Theme';
 import { api } from '../../services/supabaseClient';
 import { CurrentUser } from '../../types';
+
+// Check for screen sharing support once
+const isScreenShareSupported = !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
 
 export const LiveCall: React.FC = () => {
     const { friendId } = useParams<{ friendId: string }>();
@@ -20,8 +23,8 @@ export const LiveCall: React.FC = () => {
     
     const peerRef = useRef<Peer | null>(null);
     const localStreamRef = useRef<MediaStream | null>(null);
-    const remoteStreamRef = useRef<MediaStream | null>(null);
-    const currentCallRef = useRef<any>(null);
+    const currentCallRef = useRef<Peer.MediaConnection | null>(null);
+    const screenStreamRef = useRef<MediaStream | null>(null);
 
     const localVideoRef = useRef<HTMLVideoElement>(null);
     const remoteVideoRef = useRef<HTMLVideoElement>(null);
@@ -32,21 +35,26 @@ export const LiveCall: React.FC = () => {
         isScreenSharingRef.current = isScreenSharing;
     }, [isScreenSharing]);
 
-    const cleanup = () => {
+    const leaveCall = useCallback(() => {
+        setStatus('Call ended.');
+        // Stop all tracks
         localStreamRef.current?.getTracks().forEach(track => track.stop());
-        if (currentCallRef.current) {
-            currentCallRef.current.close();
-        }
+        screenStreamRef.current?.getTracks().forEach(track => track.stop());
+        
+        // Close call and destroy peer
+        currentCallRef.current?.close();
         if (peerRef.current && !peerRef.current.destroyed) {
             peerRef.current.destroy();
         }
-    };
+        
+        // Nullify refs
+        localStreamRef.current = null;
+        screenStreamRef.current = null;
+        currentCallRef.current = null;
+        peerRef.current = null;
 
-    const leaveCall = () => {
-        setStatus('Call ended.');
-        cleanup();
         navigate(-1);
-    };
+    }, [navigate]);
 
     useEffect(() => {
         let isMounted = true;
@@ -66,44 +74,13 @@ export const LiveCall: React.FC = () => {
 
                 setStatus('Connecting to network...');
                 const peer = new Peer(user.id, {
-                    host: '0.peerjs.com', 
-                    port: 443,
-                    path: '/',
-                    pingInterval: 5000,
-                    config: {
-                      iceServers: [
-                            {
-                                urls: "stun:stun.relay.metered.ca:80",
-                            },
-                            {
-                                urls: "turn:global.relay.metered.ca:80",
-                                username: "c471bbe57a75148f4bb4e9ef",
-                                credential: "cWdboQRIH0/hBLhd",
-                            },
-                            {
-                                urls: "turn:global.relay.metered.ca:80?transport=tcp",
-                                username: "c471bbe57a75148f4bb4e9ef",
-                                credential: "cWdboQRIH0/hBLhd",
-                            },
-                            {
-                                urls: "turn:global.relay.metered.ca:443",
-                                username: "c471bbe57a75148f4bb4e9ef",
-                                credential: "cWdboQRIH0/hBLhd",
-                            },
-                            {
-                                urls: "turns:global.relay.metered.ca:443?transport=tcp",
-                                username: "c471bbe57a75148f4bb4e9ef",
-                                credential: "cWdboQRIH0/hBLhd",
-                            },
-                        ],
-                    }
+                    // Using PeerJS's default cloud server. For production, a self-hosted server is recommended.
                 });
                 peerRef.current = peer;
 
-                const handleCallEvents = (call: any) => {
+                const handleCallEvents = (call: Peer.MediaConnection) => {
                     currentCallRef.current = call;
                     call.on('stream', (remoteStream: MediaStream) => {
-                        remoteStreamRef.current = remoteStream;
                         if (remoteVideoRef.current) remoteVideoRef.current.srcObject = remoteStream;
                         setStatus('Connected');
                         setCallEstablished(true);
@@ -116,7 +93,7 @@ export const LiveCall: React.FC = () => {
                     });
                 }
 
-                peer.on('open', () => {
+                peer.on('open', (id) => {
                     if (!isMounted) return;
                     setStatus('Ringing...');
                     if (friendId) {
@@ -132,18 +109,28 @@ export const LiveCall: React.FC = () => {
                     handleCallEvents(call);
                 });
 
-                peer.on('error', (err) => {
+                peer.on('error', (err: any) => {
                     console.error('PeerJS error:', err);
-                    setStatus(`Error: ${err.message}`);
+                    let message = `Error: ${err.message}`;
+                    if (err.type === 'peer-unavailable') {
+                        message = 'User is not available.';
+                    } else if (err.type === 'unavailable-id') {
+                        message = "Connection ID is taken. Please wait a moment.";
+                    }
+                    setStatus(message);
                     setCallEstablished(false);
                 });
                 
                 peer.on('disconnected', () => {
+                    if (!isMounted) return;
                     setStatus('Reconnecting network...');
-                    peer.reconnect();
+                    if (peerRef.current && !peerRef.current.destroyed) {
+                         peerRef.current.reconnect();
+                    }
                 });
 
             } catch (err: any) {
+                if (!isMounted) return;
                 const msg = err.name === 'NotAllowedError' ? 'Permissions denied.' : 'Media devices not found.';
                 setStatus(`Error: ${msg}`);
             }
@@ -151,15 +138,17 @@ export const LiveCall: React.FC = () => {
 
         init();
         
-        const handleUnload = () => cleanup();
-        window.addEventListener('beforeunload', handleUnload);
-
+        // This is a more comprehensive cleanup
         return () => {
             isMounted = false;
-            cleanup();
-            window.removeEventListener('beforeunload', handleUnload);
+            localStreamRef.current?.getTracks().forEach(track => track.stop());
+            screenStreamRef.current?.getTracks().forEach(track => track.stop());
+            currentCallRef.current?.close();
+            if (peerRef.current && !peerRef.current.destroyed) {
+                peerRef.current.destroy();
+            }
         };
-    }, [friendId, navigate]);
+    }, [friendId, leaveCall]);
 
     const toggleMute = () => {
         const newMutedState = !isMuted;
@@ -168,14 +157,14 @@ export const LiveCall: React.FC = () => {
     };
 
     const toggleVideo = () => {
-        if (isScreenSharing) return; // Don't allow camera toggle during screen share
+        if (isScreenSharing) return;
         const enabled = !isVideoEnabled;
         localStreamRef.current?.getVideoTracks().forEach(t => t.enabled = enabled);
         setIsVideoEnabled(enabled);
     };
-
+    
     const toggleScreenShare = async () => {
-        if (!currentCallRef.current || !localStreamRef.current) return;
+        if (!currentCallRef.current) return;
 
         const videoSender = currentCallRef.current.peerConnection.getSenders().find(
             (s: RTCRtpSender) => s.track?.kind === 'video'
@@ -189,56 +178,56 @@ export const LiveCall: React.FC = () => {
 
         if (isScreenSharingRef.current) {
             // Stop screen sharing and switch back to camera
-            try {
-                const cameraStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-                const newTrack = cameraStream.getVideoTracks()[0];
-                const oldTrack = localStreamRef.current.getVideoTracks()[0];
-
-                await videoSender.replaceTrack(newTrack);
-
-                localStreamRef.current.removeTrack(oldTrack);
-                localStreamRef.current.addTrack(newTrack);
-                oldTrack.stop();
-                
-                newTrack.enabled = true;
-                setIsVideoEnabled(true);
+            const cameraTrack = localStreamRef.current?.getVideoTracks()[0];
+            if (cameraTrack) {
+                await videoSender.replaceTrack(cameraTrack);
+                screenStreamRef.current?.getTracks().forEach(track => track.stop());
+                screenStreamRef.current = null;
                 setIsScreenSharing(false);
-            } catch (err) {
-                console.error("Could not switch to camera", err);
-                setStatus("Error: Camera not available.");
+                cameraTrack.enabled = isVideoEnabled;
             }
         } else {
             // Start screen sharing
             try {
-                const displayStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-                const newTrack = displayStream.getVideoTracks()[0];
-                const oldTrack = localStreamRef.current.getVideoTracks()[0];
+                const displayStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+                const screenTrack = displayStream.getVideoTracks()[0];
+                
+                // If there's an audio track from screen share, you can handle it here if desired
+                
+                screenStreamRef.current = displayStream;
 
-                newTrack.onended = () => {
-                    if (isScreenSharingRef.current) {
-                        toggleScreenShare();
+                const cameraTrack = localStreamRef.current?.getVideoTracks()[0];
+                if (cameraTrack) {
+                    cameraTrack.enabled = false;
+                }
+                
+                await videoSender.replaceTrack(screenTrack);
+                setIsScreenSharing(true);
+
+                screenTrack.onended = () => {
+                     // Fired when user stops sharing from browser UI
+                    if (isScreenSharingRef.current && cameraTrack) {
+                        videoSender.replaceTrack(cameraTrack);
+                        screenStreamRef.current?.getTracks().forEach(track => track.stop());
+                        screenStreamRef.current = null;
+                        setIsScreenSharing(false);
+                        cameraTrack.enabled = isVideoEnabled;
                     }
                 };
 
-                await videoSender.replaceTrack(newTrack);
-
-                localStreamRef.current.removeTrack(oldTrack);
-                localStreamRef.current.addTrack(newTrack);
-                oldTrack.stop();
-
-                setIsScreenSharing(true);
-                setIsVideoEnabled(true);
             } catch (err) {
                 console.error("Could not start screen share", err);
-                setStatus("Screen share cancelled.");
+                setStatus("Screen share cancelled or failed.");
             }
         }
     };
 
     const getStatusIcon = () => {
-        if (status.startsWith('Error')) return <WifiSlash weight="fill" color={DS.Color.Status.Error} />;
+        if (status.startsWith('Error') || status.includes('not available') || status.includes('taken')) {
+            return <WifiSlash weight="fill" color={DS.Color.Status.Error} />;
+        }
         if (callEstablished) return <WifiHigh weight="fill" color="#22c55e" />;
-        return <WarningCircle weight="fill" />;
+        return <Users weight="thin" />;
     };
 
     return (
@@ -267,22 +256,19 @@ export const LiveCall: React.FC = () => {
 
             {/* Video Area */}
             <div style={{ flex: 1, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
-                {/* Remote Video (Fullscreen Background) */}
                 <video ref={remoteVideoRef} autoPlay playsInline style={{ 
                     position: 'absolute', inset: 0,
                     width: '100%', height: '100%', objectFit: 'cover',
                     transition: 'opacity 0.5s ease', opacity: callEstablished ? 1 : 0
                 }} />
                 
-                {/* Waiting State */}
                 {!callEstablished && (
                     <div style={{ ...commonStyles.flexCenter, flexDirection: 'column', gap: '16px', color: DS.Color.Base.Content[2] }}>
                         <Users size={48} weight="thin" />
-                        <p style={{ fontSize: '14px' }}>Connecting to peer...</p>
+                        <p style={{ fontSize: '14px' }}>Waiting for connection...</p>
                     </div>
                 )}
                 
-                {/* Local Video (Picture-in-Picture) */}
                 <motion.div 
                     drag dragConstraints={{ top: -200, left: -200, right: 200, bottom: 200 }}
                     style={{
@@ -290,14 +276,15 @@ export const LiveCall: React.FC = () => {
                         width: '120px', height: '180px', borderRadius: '16px',
                         background: DS.Color.Base.Surface[3],
                         overflow: 'hidden',
-                        border: `2px solid rgba(255,255,255,0.2)`,
-                        boxShadow: '0 8px 24px rgba(0,0,0,0.5)', cursor: 'grab'
+                        border: `2px solid ${isScreenSharing ? DS.Color.Accent.Surface : 'rgba(255,255,255,0.2)'}`,
+                        boxShadow: '0 8px 24px rgba(0,0,0,0.5)', cursor: 'grab',
+                        transition: 'border 0.3s'
                     }} 
                 >
                     <video ref={localVideoRef} autoPlay muted playsInline 
                         style={{
                             width: '100%', height: '100%', objectFit: 'cover',
-                            transform: isScreenSharing ? 'scaleX(1)' : 'scaleX(-1)', // Don't mirror screen share
+                            transform: 'scaleX(-1)',
                             display: isVideoEnabled ? 'block' : 'none'
                         }}
                     />
@@ -310,10 +297,10 @@ export const LiveCall: React.FC = () => {
             </div>
             
             {/* Controls */}
-            <div style={{ padding: '48px 24px', display: 'flex', justifyContent: 'center', gap: '24px', background: 'linear-gradient(to top, #000 0%, transparent 100%)' }}>
+            <div style={{ padding: '48px 24px', display: 'flex', justifyContent: 'center', gap: '24px', background: 'linear-gradient(to top, #000 0%, transparent 100%)', zIndex: 10 }}>
                 <ControlButton onClick={toggleMute} active={!isMuted} icon={isMuted ? MicrophoneSlash : Microphone} />
                 <ControlButton onClick={toggleVideo} active={isVideoEnabled && !isScreenSharing} disabled={isScreenSharing} icon={isVideoEnabled ? VideoCamera : VideoCameraSlash} />
-                <ControlButton onClick={toggleScreenShare} active={isScreenSharing} icon={Screencast} activeColor={DS.Color.Accent.Surface} />
+                {isScreenShareSupported && <ControlButton onClick={toggleScreenShare} active={isScreenSharing} icon={Screencast} activeColor={DS.Color.Accent.Surface} />}
                 
                 <motion.button whileTap={{ scale: 0.9 }} onClick={leaveCall}
                    style={{

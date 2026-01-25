@@ -36,6 +36,32 @@ export const LiveCall: React.FC = () => {
     }, [isScreenSharing]);
 
     const leaveCall = useCallback(() => {
+        // This function is the primary cleanup handler for user-initiated call endings.
+        // It's more explicit than relying solely on the component unmount lifecycle.
+        
+        // Stop all media tracks to release camera/mic
+        localStreamRef.current?.getTracks().forEach(track => track.stop());
+        screenStreamRef.current?.getTracks().forEach(track => track.stop());
+
+        // Clean up video elements to prevent frozen frames
+        if (localVideoRef.current) localVideoRef.current.srcObject = null;
+        if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
+        
+        // Gracefully close the PeerJS media connection
+        currentCallRef.current?.close();
+        
+        // Destroy the core Peer object to disconnect from the signaling server
+        if (peerRef.current && !peerRef.current.destroyed) {
+            peerRef.current.destroy();
+        }
+        
+        // Clear refs to prevent stale data
+        peerRef.current = null;
+        currentCallRef.current = null;
+        localStreamRef.current = null;
+        screenStreamRef.current = null;
+
+        // Navigate away from the call screen
         navigate(-1);
     }, [navigate]);
 
@@ -116,28 +142,13 @@ export const LiveCall: React.FC = () => {
 
         init();
         
-        // This is the single source of truth for all cleanup.
+        // This acts as a safety net for cleanup if the component unmounts unexpectedly
+        // (e.g., browser back button), but leaveCall is the primary mechanism.
         return () => {
             localStream?.getTracks().forEach(track => track.stop());
-            localStreamRef.current?.getTracks().forEach(track => track.stop());
-            screenStreamRef.current?.getTracks().forEach(track => track.stop());
-            
-            if (localVideoRef.current) localVideoRef.current.srcObject = null;
-            if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
-
-            currentCallRef.current?.close();
-            
             if (peer && !peer.destroyed) {
                 peer.destroy();
             }
-            if (peerRef.current && !peerRef.current.destroyed) {
-                peerRef.current.destroy();
-            }
-
-            localStreamRef.current = null;
-            screenStreamRef.current = null;
-            currentCallRef.current = null;
-            peerRef.current = null;
         };
     }, [friendId, leaveCall]);
 

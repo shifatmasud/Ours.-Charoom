@@ -224,7 +224,7 @@ export const ChatInput: React.FC<{
             bottom: 0, 
             left: 0, 
             right: 0, 
-            padding: '0 24px 8px 24px',
+            padding: '0 24px 32px 24px',
             background: `linear-gradient(to top, ${theme.colors.surface1} 60%, transparent 100%)`,
             zIndex: 20
         }}>

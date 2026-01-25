@@ -109,20 +109,13 @@ export const DirectChat: React.FC<DirectChatProps> = ({ friendId }) => {
             <motion.div 
               {...theme.motion.page}
               style={{ 
-                display: 'flex', 
-                flexDirection: 'column', 
-                minHeight: '100dvh', 
-                background: theme.colors.surface1, 
-                width: '100%', 
-                maxWidth: theme.layout.maxWidth, 
-                margin: '0 auto', 
-                position: 'relative', 
-                overflow: 'hidden'
+                display: 'flex', flexDirection: 'column', height: '100dvh', 
+                background: theme.colors.surface1, width: '100%', maxWidth: theme.layout.maxWidth, margin: '0 auto', position: 'relative', overflow: 'hidden'
               }}
             >
                 <ChatHeader title={friendProfile?.username || 'Chat'} onCall={startCall} />
                 
-                <div className="scrollbar-hide" style={{ flex: 1, overflowY: 'auto', padding: '0 24px 72px 24px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div className="scrollbar-hide" style={{ flex: 1, overflowY: 'auto', padding: '0 24px 100px 24px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
                     {messages.length === 0 && (
                        <div style={{ height: '100%', ...commonStyles.flexCenter, flexDirection: 'column', opacity: 0.3, gap: '16px' }}>
                           <div style={{ width: '40px', height: '40px', borderRadius: '50%', border: `1px solid ${theme.colors.text3}` }}></div>

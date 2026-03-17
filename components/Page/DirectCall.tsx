@@ -1,97 +1,284 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { JitsiMeeting } from '@jitsi/react-sdk';
-import { theme, commonStyles } from '../../Theme';
-import { api } from '../../services/supabaseClient';
-import { CurrentUser } from '../../types';
-
+import { motion, AnimatePresence } from 'framer-motion';
+import { 
+  Room, 
+  RoomEvent, 
+  RemoteParticipant, 
+  RemoteTrack, 
+  RemoteTrackPublication, 
+  Participant, 
+  Track,
+  VideoTrack,
+  LocalVideoTrack,
+  LocalAudioTrack,
+  createLocalVideoTrack,
+  createLocalAudioTrack
+} from 'livekit-client';
+import { 
+  PhoneDisconnect, 
+  Microphone, 
+  MicrophoneSlash, 
+  VideoCamera, 
+  VideoCameraSlash,
+  User,
+  CaretLeft
+} from '@phosphor-icons/react';
+import { theme, DS, commonStyles } from '../../Theme';
 import { useAuth } from '../../contexts/AuthContext';
+import { Loader } from '../Core/Loader';
 
 export const DirectCall: React.FC = () => {
   const { user: currentUser } = useAuth();
   const { roomId } = useParams<{ roomId: string }>();
   const navigate = useNavigate();
-  const [useJitsi, setUseJitsi] = useState(true);
+  
+  const [room, setRoom] = useState<Room | null>(null);
+  const [remoteParticipants, setRemoteParticipants] = useState<RemoteParticipant[]>([]);
+  const [isMuted, setIsMuted] = useState(false);
+  const [isVideoOff, setIsVideoOff] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // Direction 1: Jitsi Meet (Managed UI, easiest)
-  // Direction 2: Daily.co (Customizable SDK, high quality)
-  // Direction 3: WebRTC + PeerJS (Full custom P2P control)
+  const localVideoRef = useRef<HTMLVideoElement>(null);
+  const remoteVideoRefs = useRef<Map<string, HTMLVideoElement>>(new Map());
 
-  if (!roomId) return null;
+  useEffect(() => {
+    if (!roomId || !currentUser) return;
+
+    const connectToRoom = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+
+        // 1. Get token from our server
+        const response = await fetch(`/api/get-livekit-token?room=${roomId}&identity=${currentUser.username || currentUser.id}`);
+        const data = await response.json();
+        
+        if (data.error) throw new Error(data.error);
+        const { token, serverUrl } = data;
+
+        // 2. Initialize Room
+        const wsUrl = import.meta.env.VITE_LIVEKIT_URL || serverUrl;
+        
+        if (!wsUrl) {
+          throw new Error('LiveKit URL is not configured. Please set LIVEKIT_URL in your server environment.');
+        }
+
+        const r = new Room({
+          adaptiveStream: true,
+          dynacast: true,
+        });
+
+        // 3. Setup Event Listeners
+        r.on(RoomEvent.ParticipantConnected, (p) => {
+          setRemoteParticipants(prev => [...prev, p]);
+        });
+
+        r.on(RoomEvent.ParticipantDisconnected, (p) => {
+          setRemoteParticipants(prev => prev.filter(part => part.sid !== p.sid));
+        });
+
+        r.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
+          if (track.kind === Track.Kind.Video) {
+            const el = remoteVideoRefs.current.get(participant.sid);
+            if (el) track.attach(el);
+          } else if (track.kind === Track.Kind.Audio) {
+            track.attach();
+          }
+        });
+
+        r.on(RoomEvent.TrackUnsubscribed, (track, publication, participant) => {
+          track.detach();
+        });
+
+        // 4. Connect
+        await r.connect(wsUrl, token);
+        setRoom(r);
+
+        // 5. Publish Local Tracks
+        await r.localParticipant.enableCameraAndMicrophone();
+        
+        // Attach local video
+        const localTrackPub = r.localParticipant.getTrackPublication(Track.Source.Camera);
+        if (localTrackPub?.videoTrack && localVideoRef.current) {
+          localTrackPub.videoTrack.attach(localVideoRef.current);
+        }
+
+        setRemoteParticipants(Array.from(r.remoteParticipants.values()));
+        setLoading(false);
+
+      } catch (e) {
+        console.error('LiveKit connection error:', e);
+        setError((e as Error).message);
+        setLoading(false);
+      }
+    };
+
+    connectToRoom();
+
+    return () => {
+      room?.disconnect();
+    };
+  }, [roomId, currentUser]);
+
+  const toggleMute = async () => {
+    if (!room) return;
+    const enabled = !isMuted;
+    await room.localParticipant.setMicrophoneEnabled(!enabled);
+    setIsMuted(enabled);
+  };
+
+  const toggleVideo = async () => {
+    if (!room) return;
+    const off = !isVideoOff;
+    await room.localParticipant.setCameraEnabled(!off);
+    setIsVideoOff(off);
+  };
+
+  const endCall = () => {
+    room?.disconnect();
+    navigate(-1);
+  };
+
+  if (loading) return <Loader fullscreen label="CONNECTING TO CALL" />;
+  
+  if (error) {
+    return (
+      <div style={{ ...commonStyles.flexCenter, height: '100vh', background: '#000', color: '#fff', flexDirection: 'column', gap: '20px', padding: '40px', textAlign: 'center' }}>
+        <p style={{ color: DS.Color.Status.Error, maxWidth: '400px' }}>{error}</p>
+        <button onClick={() => navigate(-1)} style={{ padding: '12px 24px', background: DS.Color.Base.Surface[2], border: 'none', borderRadius: '12px', color: '#fff', cursor: 'pointer' }}>Go Back</button>
+      </div>
+    );
+  }
 
   return (
-    <motion.div 
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      style={{ 
-        ...commonStyles.pageContainer, 
+    <div style={{ position: 'fixed', inset: 0, background: '#000', zIndex: 9999, overflow: 'hidden' }}>
+      
+      {/* Remote Video (Main View) */}
+      <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+        {remoteParticipants.length > 0 ? (
+          <div style={{ display: 'grid', gridTemplateColumns: remoteParticipants.length > 1 ? '1fr 1fr' : '1fr', height: '100%', width: '100%' }}>
+            {remoteParticipants.map(p => (
+              <div key={p.sid} style={{ position: 'relative', background: '#111' }}>
+                <video 
+                  ref={el => { if (el) remoteVideoRefs.current.set(p.sid, el); }}
+                  autoPlay
+                  playsInline
+                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                />
+                <div style={{ position: 'absolute', bottom: '20px', left: '20px', background: 'rgba(0,0,0,0.5)', padding: '4px 12px', borderRadius: '20px', color: '#fff', fontSize: '12px', backdropFilter: 'blur(10px)' }}>
+                  {p.identity}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div style={{ ...commonStyles.flexCenter, height: '100%', flexDirection: 'column', gap: '16px' }}>
+            <div style={{ width: '80px', height: '80px', borderRadius: '50%', background: '#222', ...commonStyles.flexCenter }}>
+              <User size={40} color="#444" />
+            </div>
+            <p style={{ color: '#666', fontSize: '14px' }}>Waiting for others to join...</p>
+          </div>
+        )}
+      </div>
+
+      {/* Local Video (PIP) */}
+      <motion.div 
+        drag
+        dragConstraints={{ left: 20, right: window.innerWidth - 140, top: 20, bottom: window.innerHeight - 200 }}
+        style={{ 
+          position: 'absolute', 
+          top: '40px', 
+          right: '20px', 
+          width: '120px', 
+          height: '180px', 
+          borderRadius: '16px', 
+          overflow: 'hidden', 
+          background: '#222',
+          boxShadow: '0 10px 30px rgba(0,0,0,0.5)',
+          border: '1px solid rgba(255,255,255,0.1)',
+          zIndex: 100
+        }}
+      >
+        <video 
+          ref={localVideoRef}
+          autoPlay
+          playsInline
+          muted
+          style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)' }}
+        />
+        {isVideoOff && (
+          <div style={{ position: 'absolute', inset: 0, background: '#222', ...commonStyles.flexCenter }}>
+            <VideoCameraSlash size={24} color="#666" />
+          </div>
+        )}
+      </motion.div>
+
+      {/* Controls */}
+      <div style={{ 
+        position: 'absolute', 
+        bottom: '40px', 
+        left: '50%', 
+        transform: 'translateX(-50%)', 
         display: 'flex', 
-        alignItems: 'center', 
-        justifyContent: 'center', 
-        background: '#000', 
-        height: '100vh', 
-        width: '100vw',
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        zIndex: 9999
-      }}
-    >
-      {useJitsi ? (
-        <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-          <JitsiMeeting
-            domain="meet.jit.si"
-            roomName={roomId}
-            configOverwrite={{
-              startWithAudioMuted: true,
-              disableModeratorIndicator: true,
-              startScreenSharing: false,
-              enableEmailInStats: false
-            }}
-            interfaceConfigOverwrite={{
-              DISABLE_JOIN_LEAVE_NOTIFICATIONS: true
-            }}
-            userInfo={{
-              displayName: currentUser?.full_name || 'User',
-              email: ''
-            }}
-            onApiReady={(externalApi) => {
-              // setup event listeners
-              externalApi.addEventListener('videoConferenceLeft', () => {
-                navigate(-1);
-              });
-            }}
-            getIFrameRef={(iframeRef) => {
-              iframeRef.style.height = '100%';
-              iframeRef.style.width = '100%';
-            }}
-          />
-          <button 
-            onClick={() => navigate(-1)} 
-            style={{ 
-              position: 'absolute', 
-              top: '20px', 
-              left: '20px', 
-              zIndex: 10000,
-              padding: '8px 16px', 
-              background: 'rgba(0,0,0,0.5)', 
-              color: 'white', 
-              border: '1px solid rgba(255,255,255,0.2)', 
-              borderRadius: '8px', 
-              cursor: 'pointer',
-              backdropFilter: 'blur(10px)'
-            }}
-          >
-            Exit Call
-          </button>
-        </div>
-      ) : (
-        <div style={{ textAlign: 'center', color: 'white' }}>
-          <p>Redirecting to external call...</p>
-          <button onClick={() => navigate(-1)} style={{ padding: '10px 20px', background: theme.colors.surface2, color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer' }}>Go Back</button>
-        </div>
-      )}
-    </motion.div>
+        gap: '20px', 
+        alignItems: 'center',
+        background: 'rgba(255,255,255,0.1)',
+        padding: '12px 24px',
+        borderRadius: '40px',
+        backdropFilter: 'blur(20px)',
+        border: '1px solid rgba(255,255,255,0.1)',
+        zIndex: 100
+      }}>
+        <button 
+          onClick={toggleMute}
+          style={{ 
+            width: '48px', height: '48px', borderRadius: '50%', border: 'none', 
+            background: isMuted ? DS.Color.Status.Error : 'rgba(255,255,255,0.1)',
+            color: '#fff', cursor: 'pointer', ...commonStyles.flexCenter, transition: 'all 0.2s'
+          }}
+        >
+          {isMuted ? <MicrophoneSlash size={20} weight="fill" /> : <Microphone size={20} weight="fill" />}
+        </button>
+
+        <button 
+          onClick={endCall}
+          style={{ 
+            width: '64px', height: '64px', borderRadius: '50%', border: 'none', 
+            background: DS.Color.Status.Error,
+            color: '#fff', cursor: 'pointer', ...commonStyles.flexCenter, transition: 'all 0.2s'
+          }}
+        >
+          <PhoneDisconnect size={28} weight="fill" />
+        </button>
+
+        <button 
+          onClick={toggleVideo}
+          style={{ 
+            width: '48px', height: '48px', borderRadius: '50%', border: 'none', 
+            background: isVideoOff ? DS.Color.Status.Error : 'rgba(255,255,255,0.1)',
+            color: '#fff', cursor: 'pointer', ...commonStyles.flexCenter, transition: 'all 0.2s'
+          }}
+        >
+          {isVideoOff ? <VideoCameraSlash size={20} weight="fill" /> : <VideoCamera size={20} weight="fill" />}
+        </button>
+      </div>
+
+      {/* Back Button */}
+      <button 
+        onClick={() => navigate(-1)}
+        style={{ 
+          position: 'absolute', top: '40px', left: '20px', 
+          background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: '12px', 
+          padding: '8px 16px', color: '#fff', cursor: 'pointer',
+          display: 'flex', alignItems: 'center', gap: '8px', backdropFilter: 'blur(10px)',
+          zIndex: 100
+        }}
+      >
+        <CaretLeft size={18} /> Exit
+      </button>
+
+    </div>
   );
 };

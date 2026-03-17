@@ -2,7 +2,7 @@
 import ZoomVideo, { VideoClient } from '@zoom/videosdk';
 
 class ZoomService {
-  private client: VideoClient;
+  private client: any;
   private isInitialized = false;
 
   constructor() {

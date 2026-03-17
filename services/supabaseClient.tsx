@@ -51,8 +51,8 @@ export const api = {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password: pass });
     if (error) throw error;
     
-    // Fetch or construct profile
-    const profile = await api.getUserProfile(data.user.id).catch(() => null);
+    // Fetch or construct profile - pass the user object to avoid redundant network calls
+    const profile = await api.getUserProfile(data.user.id, data.user).catch(() => null);
     
     if (!profile) {
         // Fallback using auth metadata if profile row is missing
@@ -60,7 +60,7 @@ export const api = {
             id: data.user.id,
             username: data.user.user_metadata?.full_name?.replace(/\s+/g, '_').toLowerCase() || email.split('@')[0],
             avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${data.user.id}`,
-            full_name: data.user.user_metadata?.full_name
+            full_name: data.user.user_metadata?.full_name || email.split('@')[0]
         };
     }
     return profile;
@@ -76,42 +76,57 @@ export const api = {
     window.location.href = '/';
   },
 
-  getCurrentUser: async (prefetchedUser?: any): Promise<CurrentUser> => {
-    let user = prefetchedUser;
+  getCurrentUser: async (): Promise<CurrentUser> => {
+    // Use getSession first as it's faster (local storage)
+    const { data: sessionData } = await supabase.auth.getSession();
+    let user = sessionData?.session?.user;
+    
     if (!user) {
-        const { data: { session } } = await supabase.auth.getSession();
-        user = session?.user;
+        const { data: authData, error: authError } = await supabase.auth.getUser();
+        if (authError || !authData?.user) throw authError || new Error('No user logged in');
+        user = authData.user;
     }
-    if (!user) throw new Error('No user logged in');
     
-    const { data } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle();
+    const { data, error } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle();
+    if (error) console.error('Error fetching profile:', error);
     
-    // Fetch real-time counts directly from follows table
-    const { count: followersCount } = await supabase
-        .from('follows')
-        .select('*', { count: 'exact', head: true })
-        .eq('following_id', user.id);
+    // Fetch real-time counts directly from follows table - wrap in try/catch to prevent blocking
+    const fetchCount = async (query: any) => {
+        try {
+            const { count, error } = await query;
+            if (error) return 0;
+            return count || 0;
+        } catch (e) {
+            return 0;
+        }
+    };
 
-    const { count: followingCount } = await supabase
+    const followersPromise = fetchCount(supabase
         .from('follows')
         .select('*', { count: 'exact', head: true })
-        .eq('follower_id', user.id);
+        .eq('following_id', user.id));
+
+    const followingPromise = fetchCount(supabase
+        .from('follows')
+        .select('*', { count: 'exact', head: true })
+        .eq('follower_id', user.id));
+    
+    const [followersCount, followingCount] = await Promise.all([followersPromise, followingPromise]);
     
     // Return merged data or fallback from auth metadata
     return {
         id: user.id,
-        username: data?.username || user.user_metadata?.full_name?.replace(/\s+/g, '_').toLowerCase() || 'user',
+        username: data?.username || user.user_metadata?.full_name?.replace(/\s+/g, '_').toLowerCase() || user.email?.split('@')[0] || 'user',
         avatar_url: data?.avatar_url || user.user_metadata?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.id}`,
-        full_name: data?.full_name || user.user_metadata?.full_name,
+        full_name: data?.full_name || user.user_metadata?.full_name || user.email?.split('@')[0] || 'Anonymous',
         bio: data?.bio,
-        followers_count: followersCount || 0,
-        following_count: followingCount || 0
+        followers_count: followersCount,
+        following_count: followingCount
     };
   },
 
   updateCurrentUser: async (updates: Partial<CurrentUser>): Promise<CurrentUser> => {
-    const { data: { session } } = await supabase.auth.getSession();
-    const user = session?.user;
+    const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('No user');
     
     // Whitelist allowed fields to prevent errors with virtual properties
@@ -144,46 +159,61 @@ export const api = {
   },
 
   // --- Profiles ---
-  getUserProfile: async (userId: string): Promise<Profile> => {
-    const { data: { session } } = await supabase.auth.getSession();
-    const user = session?.user;
+  getUserProfile: async (userId: string, existingUser?: any): Promise<Profile> => {
+    let user = existingUser;
+    if (!user) {
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        user = authUser;
+    }
+    
     const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
     if (error) throw error;
 
-    // Fetch real-time counts from the source of truth
-    const { count: followersCount } = await supabase
-        .from('follows')
-        .select('*', { count: 'exact', head: true })
-        .eq('following_id', userId);
+    // Fetch real-time counts from the source of truth - wrap in try/catch to prevent blocking
+    const fetchCount = async (query: any) => {
+        try {
+            const { count, error } = await query;
+            if (error) return 0;
+            return count || 0;
+        } catch (e) {
+            return 0;
+        }
+    };
 
-    const { count: followingCount } = await supabase
+    const followersPromise = fetchCount(supabase
         .from('follows')
         .select('*', { count: 'exact', head: true })
-        .eq('follower_id', userId);
+        .eq('following_id', userId));
+
+    const followingPromise = fetchCount(supabase
+        .from('follows')
+        .select('*', { count: 'exact', head: true })
+        .eq('follower_id', userId));
+
+    const [followersCount, followingCount] = await Promise.all([followersPromise, followingPromise]);
 
     let isFollowing = false;
     if (user && user.id !== userId) {
-         const { data: follow } = await supabase.from('follows').select('*').match({ follower_id: user.id, following_id: userId }).single();
+         const { data: follow } = await supabase.from('follows').select('*').match({ follower_id: user.id, following_id: userId }).maybeSingle();
          isFollowing = !!follow;
     }
 
     return { 
         ...data, 
         is_following: isFollowing,
-        followers_count: followersCount || 0,
-        following_count: followingCount || 0 
+        followers_count: followersCount,
+        following_count: followingCount 
     };
   },
 
   getAllProfiles: async (): Promise<Profile[]> => {
-    const { data } = await supabase.from('profiles').select('*').limit(1000);
+    const { data } = await supabase.from('profiles').select('*').limit(50);
     return data || [];
   },
 
   // --- Feed & Posts ---
   getFeed: async (): Promise<Post[]> => {
-    const { data: { session } } = await supabase.auth.getSession();
-    const user = session?.user;
+    const { data: { user } } = await supabase.auth.getUser();
 
     // Fetch posts with profiles and real-time counts from related tables
     const { data, error } = await supabase
@@ -219,8 +249,7 @@ export const api = {
   },
 
   getPost: async (postId: string): Promise<Post | null> => {
-      const { data: { session } } = await supabase.auth.getSession();
-      const user = session?.user;
+      const { data: { user } } = await supabase.auth.getUser();
       
       const { data, error } = await supabase
         .from('posts')
@@ -305,8 +334,7 @@ export const api = {
 
   // --- Messaging ---
   getMessages: async (friendId: string): Promise<Message[]> => {
-      const { data: { session } } = await supabase.auth.getSession();
-      const user = session?.user;
+      const { data: { user } } = await supabase.auth.getUser();
       if (!user) return [];
 
       const { data, error } = await supabase.from('messages').select('*')
@@ -320,8 +348,7 @@ export const api = {
   },
 
   getLastMessage: async (friendId: string): Promise<Message | null> => {
-      const { data: { session } } = await supabase.auth.getSession();
-      const user = session?.user;
+      const { data: { user } } = await supabase.auth.getUser();
       if (!user) return null;
 
       const { data, error } = await supabase.from('messages').select('*')
@@ -335,14 +362,13 @@ export const api = {
   },
 
   getRecentConversations: async (): Promise<Record<string, Message>> => {
-      const { data: { session } } = await supabase.auth.getSession();
-      const user = session?.user;
+      const { data: { user } } = await supabase.auth.getUser();
       if (!user) return {};
 
       const { data, error } = await supabase.from('messages').select('*')
          .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`)
          .order('created_at', { ascending: false })
-         .limit(1000);
+         .limit(200);
          
       if (error) throw error;
       
@@ -390,8 +416,7 @@ export const api = {
 
   // --- Notifications ---
   getNotifications: async (): Promise<Notification[]> => {
-      const { data: { session } } = await supabase.auth.getSession();
-      const user = session?.user;
+      const { data: { user } } = await supabase.auth.getUser();
       if (!user) return [];
       
       const { data } = await supabase.from('notifications').select('*, sender_profile:sender_id(*)').eq('user_id', user.id).order('created_at', { ascending: false });

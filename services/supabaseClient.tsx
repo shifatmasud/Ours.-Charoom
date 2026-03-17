@@ -324,6 +324,28 @@ export const api = {
       return parseMessageContent(data);
   },
 
+  getRecentConversations: async (): Promise<Record<string, Message>> => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return {};
+
+      const { data, error } = await supabase.from('messages').select('*')
+         .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`)
+         .order('created_at', { ascending: false })
+         .limit(1000);
+         
+      if (error) throw error;
+      
+      const latestMessages: Record<string, Message> = {};
+      for (const msg of data || []) {
+          const parsed = parseMessageContent(msg);
+          const otherId = parsed.sender_id === user.id ? parsed.receiver_id : parsed.sender_id;
+          if (!latestMessages[otherId]) {
+              latestMessages[otherId] = parsed;
+          }
+      }
+      return latestMessages;
+  },
+
   sendMessage: async (senderId: string, receiverId: string, content: string, type: 'text' | 'image' | 'audio' = 'text', mediaUrl?: string): Promise<void> => {
       // Pack rich data into 'content' if it's not plain text, to support restricted schema
       let finalContent = content;

@@ -1,6 +1,6 @@
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { api } from '../services/supabaseClient';
+import { api, supabase } from '../services/supabaseClient';
 import { CurrentUser } from '../types';
 
 interface AuthContextType {
@@ -34,12 +34,39 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const isRefreshing = React.useRef(false);
-
   useEffect(() => {
-    if (isRefreshing.current) return;
-    isRefreshing.current = true;
-    refreshAuth();
+    let mounted = true;
+
+    const initAuth = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session && mounted) {
+           await refreshAuth();
+        } else if (mounted) {
+           setLoading(false);
+        }
+      } catch (e) {
+        if (mounted) setLoading(false);
+      }
+    };
+
+    initAuth();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+         if (mounted) await refreshAuth();
+      } else if (event === 'SIGNED_OUT') {
+         if (mounted) {
+           setUser(null);
+           setLoading(false);
+         }
+      }
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   return (

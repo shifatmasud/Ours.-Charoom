@@ -17,22 +17,27 @@ export const MessagesList: React.FC = () => {
   const [profiles, setProfiles] = useState<ProfileWithMeta[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
+  const [progress, setProgress] = useState(0);
 
   useEffect(() => {
     const loadUsers = async () => {
       try {
+        setProgress(10);
         const currentUser = await api.getCurrentUser();
+        setProgress(30);
         const data = await api.getAllProfiles();
+        setProgress(60);
+        
         // Filter out current user
         const others = data.filter(p => p.id !== currentUser.id);
 
-        // Fetch last message for each user to sort and display preview
-        const profilesWithMessages = await Promise.all(
-          others.map(async (profile) => {
-            const lastMsg = await api.getLastMessage(profile.id);
-            return { ...profile, lastMessage: lastMsg };
-          })
-        );
+        // Fetch all recent conversations in one go
+        const recentMessages = await api.getRecentConversations();
+        setProgress(90);
+
+        const profilesWithMessages = others.map(profile => {
+            return { ...profile, lastMessage: recentMessages[profile.id] || null };
+        });
 
         // Sort: Latest active conversations first, then others
         profilesWithMessages.sort((a, b) => {
@@ -42,9 +47,12 @@ export const MessagesList: React.FC = () => {
         });
 
         setProfiles(profilesWithMessages);
+        setProgress(100);
+        
+        // Slight delay to let the progress bar hit 100% visually
+        setTimeout(() => setLoading(false), 300);
       } catch (e) {
         console.error(e);
-      } finally {
         setLoading(false);
       }
     };
@@ -122,7 +130,7 @@ export const MessagesList: React.FC = () => {
         >
           {loading ? (
             <div style={{ padding: '24px 0' }}>
-               <BrandedProgressBar label="SYNCING" subLabel="RETRIEVING DATA STREAMS" />
+               <BrandedProgressBar label="SYNCING" subLabel="RETRIEVING DATA STREAMS" progress={progress} />
             </div>
           ) : (
             filteredProfiles.map(profile => {

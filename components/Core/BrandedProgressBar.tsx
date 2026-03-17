@@ -6,11 +6,13 @@ import { DS } from '../../Theme';
 interface BrandedProgressBarProps {
   label?: string;
   subLabel?: string;
+  progress?: number; // 0 to 100
 }
 
 export const BrandedProgressBar: React.FC<BrandedProgressBarProps> = ({ 
     label = "LOADING", 
-    subLabel = "ESTABLISHING CONNECTION" 
+    subLabel = "ESTABLISHING CONNECTION",
+    progress
 }) => {
   return (
     <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -57,8 +59,8 @@ export const BrandedProgressBar: React.FC<BrandedProgressBarProps> = ({
           {/* Animated Bar */}
           <motion.div
             initial={{ width: '0%' }}
-            animate={{ width: ['0%', '40%', '60%', '100%'] }}
-            transition={{ 
+            animate={progress !== undefined ? { width: `${progress}%` } : { width: ['0%', '40%', '60%', '100%'] }}
+            transition={progress !== undefined ? { duration: 0.3, ease: 'easeOut' } : { 
                 duration: 2.5, 
                 times: [0, 0.3, 0.6, 1],
                 ease: [0.22, 1, 0.36, 1], // Custom snappy easing

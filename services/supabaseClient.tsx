@@ -88,8 +88,23 @@ export const api = {
         user = authData.user;
     }
     
-    const { data, error } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle();
-    if (error) console.error('Error fetching profile:', error);
+    // Fetch profile data with a 5s timeout
+    const fetchProfile = async () => {
+        try {
+            const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000));
+            const { data, error } = await Promise.race([
+                supabase.from('profiles').select('*').eq('id', user.id).maybeSingle(),
+                timeout
+            ]) as any;
+            if (error) console.error('Error fetching profile:', error);
+            return data;
+        } catch (e) {
+            console.warn('Profile fetch timed out, using fallback');
+            return null;
+        }
+    };
+
+    const data = await fetchProfile();
     
     // Fetch real-time counts directly from follows table - wrap in try/catch to prevent blocking
     const fetchCount = async (query: any) => {
@@ -220,26 +235,48 @@ export const api = {
     const { data: { user } } = await supabase.auth.getUser();
 
     // Fetch posts with profiles and real-time counts from related tables
-    const { data, error } = await supabase
-      .from('posts')
-      .select(`
-        *,
-        profiles:user_id(*),
-        likes(count),
-        comments(count)
-      `)
-      .order('created_at', { ascending: false });
+    // 5s timeout for feed query
+    const fetchFeed = async () => {
+        try {
+            const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000));
+            const { data, error } = await Promise.race([
+                supabase
+                .from('posts')
+                .select(`
+                    *,
+                    profiles:user_id(*),
+                    likes(count),
+                    comments(count)
+                `)
+                .order('created_at', { ascending: false }),
+                timeout
+            ]) as any;
+            if (error) throw error;
+            return data || [];
+        } catch (e) {
+            console.warn('Feed fetch timed out or failed:', e);
+            return [];
+        }
+    };
 
-    if (error) throw error;
+    const data = await fetchFeed();
     
     // Batch fetch 'has_liked' status for the current user
     let likedPostIds = new Set<string>();
     if (user) {
-        const { data: likesData } = await supabase
-            .from('likes')
-            .select('post_id')
-            .eq('user_id', user.id);
-        likesData?.forEach((l: any) => likedPostIds.add(l.post_id));
+        try {
+            const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000));
+            const { data: likesData } = await Promise.race([
+                supabase
+                .from('likes')
+                .select('post_id')
+                .eq('user_id', user.id),
+                timeout
+            ]) as any;
+            likesData?.forEach((l: any) => likedPostIds.add(l.post_id));
+        } catch (e) {
+            console.warn('Likes status fetch timed out or failed:', e);
+        }
     }
     
     return data.map((p: any) => ({
@@ -423,8 +460,17 @@ export const api = {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return [];
       
-      const { data } = await supabase.from('notifications').select('*, sender_profile:sender_id(*)').eq('user_id', user.id).order('created_at', { ascending: false });
-      return data || [];
+      try {
+          const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000));
+          const { data } = await Promise.race([
+              supabase.from('notifications').select('*, sender_profile:sender_id(*)').eq('user_id', user.id).order('created_at', { ascending: false }),
+              timeout
+          ]) as any;
+          return data || [];
+      } catch (e) {
+          console.warn('Notifications fetch timed out or failed:', e);
+          return [];
+      }
   },
 
   markNotificationRead: async (notifId: string) => {

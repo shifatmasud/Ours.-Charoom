@@ -27,28 +27,48 @@ export const Activity: React.FC = () => {
   };
 
   useEffect(() => {
+    let mounted = true;
+    let activityTimeout: any;
+
     const load = async () => {
-        await fetchNotifications();
-        setLoading(false);
+        try {
+            // 5s safety timeout
+            activityTimeout = setTimeout(() => {
+                if (mounted) {
+                    console.warn('Activity: Data loading timed out');
+                    setLoading(false);
+                }
+            }, 5000);
+
+            await fetchNotifications();
+            if (mounted) setLoading(false);
+        } catch (e) {
+            console.error('Activity: Error loading data:', e);
+        } finally {
+            if (mounted) setLoading(false);
+            if (activityTimeout) clearTimeout(activityTimeout);
+        }
     };
     load();
     
     // Real-time Subscription
     let channel: any;
     if (user) {
-        channel = supabase.channel('activity_feed_realtime')
+        channel = supabase.channel(`activity_feed_realtime_${user.id}`)
             .on(
                 'postgres_changes',
                 { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` },
                 async () => {
-                    await fetchNotifications(); // Refresh on new item
+                    if (mounted) await fetchNotifications(); // Refresh on new item
                 }
             )
             .subscribe();
     }
 
     return () => {
+        mounted = false;
         if (channel) supabase.removeChannel(channel);
+        if (activityTimeout) clearTimeout(activityTimeout);
     };
   }, [user]);
 

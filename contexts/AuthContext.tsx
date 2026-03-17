@@ -31,10 +31,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   });
   const [loading, setLoading] = useState(() => {
     // If we have a cached user, we can skip the initial full-screen loader
-    return !localStorage.getItem('auth_user');
+    const hasCache = !!localStorage.getItem('auth_user');
+    console.log('Auth: Initial loading state:', !hasCache);
+    return !hasCache;
   });
 
   const updateUserInfo = (newUser: CurrentUser | null) => {
+    console.log('Auth: Updating user info:', newUser?.id || 'null');
     setUser(newUser);
     if (newUser) {
       localStorage.setItem('auth_user', JSON.stringify(newUser));
@@ -44,35 +47,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const refreshAuth = async (isRetry = false) => {
+    console.log('Auth: Refreshing auth...');
     let timeoutId: any;
     try {
-      // Increased safety timeout for refreshAuth to 30s
-      const timeoutPromise = new Promise((_, reject) => {
-        timeoutId = setTimeout(() => reject(new Error('Refresh auth timeout')), 30000);
+      // 5s safety timeout - will not throw, just resolve null to allow app to continue
+      const timeoutPromise = new Promise((resolve) => {
+        timeoutId = setTimeout(() => {
+          console.warn('Auth: Refresh auth timed out (5s), using cached data');
+          resolve(null);
+        }, 5000);
       });
 
       const currentUser = await Promise.race([
         api.getCurrentUser(),
         timeoutPromise
-      ]) as CurrentUser;
+      ]) as CurrentUser | null;
 
-      updateUserInfo(currentUser);
-    } catch (e) {
-      console.error('Refresh auth failed:', e);
-      
-      // If it's a timeout and we haven't retried yet, try one more time
-      if (e instanceof Error && e.message === 'Refresh auth timeout' && !isRetry) {
-        console.log('Retrying auth refresh...');
-        if (timeoutId) clearTimeout(timeoutId);
-        return refreshAuth(true);
+      if (currentUser) {
+        updateUserInfo(currentUser);
       }
-
-      // If we already have a user (e.g. from localStorage or Login), don't clear it on timeout
-      // This prevents the app from logging the user out just because of a slow network
-      if (e instanceof Error && (e.message === 'Refresh auth timeout' || e.message.includes('timeout'))) {
-        console.warn('Auth refresh timed out, keeping existing session if available');
-      } else {
-        // Only clear user on explicit auth errors (401, etc)
+    } catch (e) {
+      console.error('Auth: Refresh auth failed with error:', e);
+      // Only clear user on explicit auth errors (e.g. 401 Unauthorized)
+      // If it's a network error, we keep the cached user
+      if (e instanceof Error && (e.message.includes('401') || e.message.includes('unauthorized'))) {
         updateUserInfo(null);
       }
     } finally {
@@ -86,30 +84,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     let authTimeout: any;
 
     const initAuth = async () => {
+      console.log('Auth: Initializing...');
       try {
-        // Safety timeout: if auth doesn't resolve in 20 seconds, stop loading
+        // Safety timeout: if auth doesn't resolve in 5 seconds, stop loading
         authTimeout = setTimeout(() => {
           if (mounted) {
-            console.warn('Auth initialization timed out');
+            console.warn('Auth: Initialization timed out');
             setLoading(false);
           }
-        }, 20000);
+        }, 5000);
 
         const { data: { session }, error } = await supabase.auth.getSession();
         
         if (error) {
-          console.error('Session error:', error);
+          console.error('Auth: Session error:', error);
           if (mounted) setLoading(false);
           return;
         }
 
         if (session && mounted) {
+          console.log('Auth: Session found, refreshing profile...');
           await refreshAuth();
         } else if (mounted) {
+          console.log('Auth: No session found');
+          updateUserInfo(null);
           setLoading(false);
         }
       } catch (e) {
-        console.error('Auth init exception:', e);
+        console.error('Auth: Init exception:', e);
         if (mounted) setLoading(false);
       } finally {
         if (authTimeout) clearTimeout(authTimeout);
@@ -119,6 +121,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     initAuth();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log('Auth: State change event:', event);
       if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
         if (mounted) await refreshAuth();
       } else if (event === 'SIGNED_OUT') {
@@ -127,9 +130,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setLoading(false);
         }
       } else if (event === 'INITIAL_SESSION') {
+        // Only clear if we don't have a session AND we don't have a cached user
+        // This prevents the optimistic UI from being wiped out by a slow INITIAL_SESSION
         if (!session && mounted) {
-          updateUserInfo(null);
-          setLoading(false);
+          const hasCache = !!localStorage.getItem('auth_user');
+          if (!hasCache) {
+            updateUserInfo(null);
+            setLoading(false);
+          }
         }
       }
     });

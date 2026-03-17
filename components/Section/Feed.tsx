@@ -37,38 +37,52 @@ export const Feed: React.FC = () => {
 
   useEffect(() => {
     if (!currentUser) return;
+    let mounted = true;
+    let feedTimeout: any;
+
     const loadData = async () => {
       try {
+        // 5s safety timeout for the feed itself
+        feedTimeout = setTimeout(() => {
+          if (mounted) {
+            console.warn('Feed: Data loading timed out');
+            setLoading(false);
+          }
+        }, 5000);
+
         const feedData = await api.getFeed();
-        setPosts(feedData);
+        if (mounted) setPosts(feedData);
         
         // Initial Notification Check
         const notifs = await api.getNotifications();
-        setUnreadCount(notifs.filter(n => !n.is_read).length);
+        if (mounted) setUnreadCount(notifs.filter(n => !n.is_read).length);
 
       } catch (e) {
-        console.error(e);
+        console.error('Feed: Error loading data:', e);
       } finally {
-        setLoading(false);
+        if (mounted) setLoading(false);
+        if (feedTimeout) clearTimeout(feedTimeout);
       }
     };
     loadData();
     
     // Realtime Notification Subscription
     let channel: any;
-    channel = supabase.channel('public:notifications')
+    channel = supabase.channel(`public:notifications:${currentUser.id}`)
     .on(
        'postgres_changes',
        { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${currentUser.id}` },
        (payload) => {
-           setUnreadCount(prev => prev + 1);
+           if (mounted) setUnreadCount(prev => prev + 1);
        }
     )
     .subscribe();
 
     return () => {
+        mounted = false;
         if(channel) supabase.removeChannel(channel);
         if (pressTimer.current) clearTimeout(pressTimer.current);
+        if (feedTimeout) clearTimeout(feedTimeout);
     };
 
   }, [currentUser]);

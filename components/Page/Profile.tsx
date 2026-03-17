@@ -33,9 +33,20 @@ export const Profile: React.FC = () => {
 
   useEffect(() => {
     if (!currentUser) return;
+    let mounted = true;
+    let profileTimeout: any;
+
     const loadData = async () => {
       try {
         setLoading(true);
+        
+        // 5s safety timeout
+        profileTimeout = setTimeout(() => {
+          if (mounted) {
+            console.warn('Profile: Data loading timed out');
+            setLoading(false);
+          }
+        }, 5000);
 
         const targetId = userId || currentUser.id;
         
@@ -44,21 +55,29 @@ export const Profile: React.FC = () => {
           api.getUserPosts(targetId)
         ]);
 
-        setProfileUser(fetchedProfile);
-        setPosts(fetchedPosts);
-        
-        if (targetId === currentUser.id) {
-          setEditName(fetchedProfile.full_name || '');
-          setEditBio(fetchedProfile.bio || '');
+        if (mounted) {
+          setProfileUser(fetchedProfile);
+          setPosts(fetchedPosts);
+          
+          if (targetId === currentUser.id) {
+            setEditName(fetchedProfile.full_name || '');
+            setEditBio(fetchedProfile.bio || '');
+          }
         }
 
       } catch (e) {
-        console.error(e);
+        console.error('Profile: Error loading data:', e);
       } finally {
-        setLoading(false);
+        if (mounted) setLoading(false);
+        if (profileTimeout) clearTimeout(profileTimeout);
       }
     };
     loadData();
+
+    return () => {
+      mounted = false;
+      if (profileTimeout) clearTimeout(profileTimeout);
+    };
   }, [userId, currentUser]);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {

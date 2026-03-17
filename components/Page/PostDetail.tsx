@@ -19,19 +19,37 @@ export const PostDetail: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let mounted = true;
+    let postTimeout: any;
+
     const loadData = async () => {
       if (!postId) return;
       try {
         setLoading(true);
+        
+        // 5s safety timeout
+        postTimeout = setTimeout(() => {
+          if (mounted) {
+            console.warn('PostDetail: Data loading timed out');
+            setLoading(false);
+          }
+        }, 5000);
+
         const postData = await api.getPost(postId);
-        setPost(postData);
+        if (mounted) setPost(postData);
       } catch (e) {
         console.error("Failed to load post", e);
       } finally {
-        setLoading(false);
+        if (mounted) setLoading(false);
+        if (postTimeout) clearTimeout(postTimeout);
       }
     };
     loadData();
+
+    return () => {
+      mounted = false;
+      if (postTimeout) clearTimeout(postTimeout);
+    };
   }, [postId]);
 
   const handleBack = () => {

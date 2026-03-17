@@ -13,7 +13,7 @@ type AuthView = 'login' | 'register' | 'reset';
 
 export const Login: React.FC = () => {
   const navigate = useNavigate();
-  const { refreshAuth } = useAuth();
+  const { setUser } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
@@ -50,8 +50,8 @@ export const Login: React.FC = () => {
             setSuccessMsg("Check your email for reset instructions.");
         } else {
             // Login (or Secret Guest)
-            await api.signInWithPassword(email, password);
-            await refreshAuth();
+            const user = await api.signInWithPassword(email, password);
+            setUser(user);
             navigate('/');
         }
     } catch (err: any) {

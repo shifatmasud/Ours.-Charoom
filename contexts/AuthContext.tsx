@@ -7,12 +7,14 @@ interface AuthContextType {
   user: CurrentUser | null;
   loading: boolean;
   refreshAuth: () => Promise<void>;
+  setUser: (user: CurrentUser | null) => void;
 }
 
 const AuthContext = createContext<AuthContextType>({ 
   user: null, 
   loading: true,
-  refreshAuth: async () => {} 
+  refreshAuth: async () => {},
+  setUser: () => {}
 });
 
 export const useAuth = () => useContext(AuthContext);
@@ -32,12 +34,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const isRefreshing = React.useRef(false);
+
   useEffect(() => {
+    if (isRefreshing.current) return;
+    isRefreshing.current = true;
     refreshAuth();
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, loading, refreshAuth }}>
+    <AuthContext.Provider value={{ user, loading, refreshAuth, setUser }}>
       {children}
     </AuthContext.Provider>
   );

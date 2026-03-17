@@ -40,7 +40,7 @@ const ICE_SERVERS = {
   ]
 };
 
-export const GroupCall: React.FC = () => {
+export const DirectCall: React.FC = () => {
   const { roomId } = useParams<{ roomId: string }>();
   const navigate = useNavigate();
   
@@ -368,7 +368,7 @@ export const GroupCall: React.FC = () => {
 
         <div style={{ padding: '32px', textAlign: 'center', zIndex: 10 }}>
             <h2 style={{ color: theme.colors.text2, fontSize: '14px', letterSpacing: '2px', textTransform: 'uppercase' }}>
-                Group Link
+                Direct Call
             </h2>
             <p style={{ color: theme.colors.text3, fontSize: '12px', marginTop: '8px' }}>{status}</p>
         </div>

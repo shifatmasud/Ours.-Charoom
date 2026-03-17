@@ -331,6 +331,7 @@ export const Profile: React.FC = () => {
                  style={{ 
                    position: 'fixed', bottom: 0, left: 0, right: 0, 
                    background: theme.colors.surface2,
+                   color: theme.colors.text1,
                    borderTopLeftRadius: theme.radius.xl,
                    borderTopRightRadius: theme.radius.xl,
                    padding: '24px 24px 48px 24px',
@@ -390,7 +391,7 @@ export const Profile: React.FC = () => {
                    </div>
 
                    <div style={{ marginBottom: '24px' }}>
-                       <label style={{ fontSize: '11px', color: theme.colors.text3, textTransform: 'uppercase', fontWeight: 700, marginBottom: '8px', display: 'block' }}>Name</label>
+                       <label style={{ fontSize: '11px', color: theme.colors.text2, textTransform: 'uppercase', fontWeight: 700, marginBottom: '8px', display: 'block' }}>Name</label>
                        <input 
                          type="text" 
                          value={editName}
@@ -408,7 +409,7 @@ export const Profile: React.FC = () => {
                    </div>
                    
                    <div style={{ marginBottom: '32px' }}>
-                       <label style={{ fontSize: '11px', color: theme.colors.text3, textTransform: 'uppercase', fontWeight: 700, marginBottom: '8px', display: 'block' }}>Bio</label>
+                       <label style={{ fontSize: '11px', color: theme.colors.text2, textTransform: 'uppercase', fontWeight: 700, marginBottom: '8px', display: 'block' }}>Bio</label>
                        <textarea 
                          value={editBio}
                          onChange={(e) => setEditBio(e.target.value)}

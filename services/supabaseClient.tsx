@@ -76,8 +76,12 @@ export const api = {
     window.location.href = '/';
   },
 
-  getCurrentUser: async (): Promise<CurrentUser> => {
-    const { data: { user } } = await supabase.auth.getUser();
+  getCurrentUser: async (prefetchedUser?: any): Promise<CurrentUser> => {
+    let user = prefetchedUser;
+    if (!user) {
+        const { data: { session } } = await supabase.auth.getSession();
+        user = session?.user;
+    }
     if (!user) throw new Error('No user logged in');
     
     const { data } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle();
@@ -106,7 +110,8 @@ export const api = {
   },
 
   updateCurrentUser: async (updates: Partial<CurrentUser>): Promise<CurrentUser> => {
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { session } } = await supabase.auth.getSession();
+    const user = session?.user;
     if (!user) throw new Error('No user');
     
     // Whitelist allowed fields to prevent errors with virtual properties
@@ -140,7 +145,8 @@ export const api = {
 
   // --- Profiles ---
   getUserProfile: async (userId: string): Promise<Profile> => {
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { session } } = await supabase.auth.getSession();
+    const user = session?.user;
     const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
     if (error) throw error;
 
@@ -170,13 +176,14 @@ export const api = {
   },
 
   getAllProfiles: async (): Promise<Profile[]> => {
-    const { data } = await supabase.from('profiles').select('*').limit(50);
+    const { data } = await supabase.from('profiles').select('*').limit(1000);
     return data || [];
   },
 
   // --- Feed & Posts ---
   getFeed: async (): Promise<Post[]> => {
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { session } } = await supabase.auth.getSession();
+    const user = session?.user;
 
     // Fetch posts with profiles and real-time counts from related tables
     const { data, error } = await supabase
@@ -212,7 +219,8 @@ export const api = {
   },
 
   getPost: async (postId: string): Promise<Post | null> => {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
       
       const { data, error } = await supabase
         .from('posts')
@@ -297,7 +305,8 @@ export const api = {
 
   // --- Messaging ---
   getMessages: async (friendId: string): Promise<Message[]> => {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
       if (!user) return [];
 
       const { data, error } = await supabase.from('messages').select('*')
@@ -311,7 +320,8 @@ export const api = {
   },
 
   getLastMessage: async (friendId: string): Promise<Message | null> => {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
       if (!user) return null;
 
       const { data, error } = await supabase.from('messages').select('*')
@@ -325,7 +335,8 @@ export const api = {
   },
 
   getRecentConversations: async (): Promise<Record<string, Message>> => {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
       if (!user) return {};
 
       const { data, error } = await supabase.from('messages').select('*')
@@ -379,7 +390,8 @@ export const api = {
 
   // --- Notifications ---
   getNotifications: async (): Promise<Notification[]> => {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
       if (!user) return [];
       
       const { data } = await supabase.from('notifications').select('*, sender_profile:sender_id(*)').eq('user_id', user.id).order('created_at', { ascending: false });

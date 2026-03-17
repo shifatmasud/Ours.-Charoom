@@ -9,11 +9,13 @@ import { DS } from '../../Theme';
 import { commonStyles, theme } from '../../Theme';
 import { Loader } from '../Core/Loader';
 
+import { useAuth } from '../../contexts/AuthContext';
+
 export const PostDetail: React.FC = () => {
+  const { user: currentUser } = useAuth();
   const { postId } = useParams<{ postId: string }>();
   const navigate = useNavigate();
   const [post, setPost] = useState<Post | null>(null);
-  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -21,11 +23,7 @@ export const PostDetail: React.FC = () => {
       if (!postId) return;
       try {
         setLoading(true);
-        const [user, postData] = await Promise.all([
-          api.getCurrentUser(),
-          api.getPost(postId)
-        ]);
-        setCurrentUser(user);
+        const postData = await api.getPost(postId);
         setPost(postData);
       } catch (e) {
         console.error("Failed to load post", e);

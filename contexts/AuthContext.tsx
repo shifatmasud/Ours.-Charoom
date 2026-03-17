@@ -6,7 +6,7 @@ import { CurrentUser } from '../types';
 interface AuthContextType {
   user: CurrentUser | null;
   loading: boolean;
-  refreshAuth: () => Promise<void>;
+  refreshAuth: (sessionUser?: any) => Promise<void>;
   setUser: (user: CurrentUser | null) => void;
 }
 
@@ -23,11 +23,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const refreshAuth = async () => {
+  const refreshAuth = async (sessionUser?: any) => {
     try {
-      const currentUser = await api.getCurrentUser();
+      const currentUser = await api.getCurrentUser(sessionUser);
       setUser(currentUser);
     } catch (e) {
+      console.error("Failed to refresh auth:", e);
       setUser(null);
     } finally {
       setLoading(false);
@@ -37,29 +38,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     let mounted = true;
 
-    const initAuth = async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session && mounted) {
-           await refreshAuth();
-        } else if (mounted) {
-           setLoading(false);
-        }
-      } catch (e) {
-        if (mounted) setLoading(false);
-      }
-    };
-
-    initAuth();
-
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-         if (mounted) await refreshAuth();
-      } else if (event === 'SIGNED_OUT') {
-         if (mounted) {
-           setUser(null);
-           setLoading(false);
+      if (!mounted) return;
+
+      if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+         if (session) {
+            await refreshAuth(session.user);
+         } else {
+            setUser(null);
+            setLoading(false);
          }
+      } else if (event === 'SIGNED_OUT') {
+         setUser(null);
+         setLoading(false);
       }
     });
 

@@ -13,12 +13,14 @@ import { DS } from '../../Theme';
 import { useTheme } from '../../ThemeContext';
 import { Confetti } from '../Core/Confetti';
 
+import { useAuth } from '../../contexts/AuthContext';
+
 export const Feed: React.FC = () => {
+  const { user: currentUser } = useAuth();
   const { mode, toggleTheme } = useTheme();
   const navigate = useNavigate();
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
-  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [unreadCount, setUnreadCount] = useState(0);
 
   // Input State
@@ -34,20 +36,15 @@ export const Feed: React.FC = () => {
   const pressTimer = useRef<number | null>(null);
 
   useEffect(() => {
+    if (!currentUser) return;
     const loadData = async () => {
       try {
-        const [user, feedData] = await Promise.all([
-          api.getCurrentUser(),
-          api.getFeed()
-        ]);
-        setCurrentUser(user);
+        const feedData = await api.getFeed();
         setPosts(feedData);
         
         // Initial Notification Check
-        if (user) {
-             const notifs = await api.getNotifications();
-             setUnreadCount(notifs.filter(n => !n.is_read).length);
-        }
+        const notifs = await api.getNotifications();
+        setUnreadCount(notifs.filter(n => !n.is_read).length);
 
       } catch (e) {
         console.error(e);
@@ -59,25 +56,22 @@ export const Feed: React.FC = () => {
     
     // Realtime Notification Subscription
     let channel: any;
-    api.getCurrentUser().then(user => {
-       if(!user) return;
-       channel = supabase.channel('public:notifications')
-       .on(
-          'postgres_changes',
-          { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` },
-          (payload) => {
-              setUnreadCount(prev => prev + 1);
-          }
-       )
-       .subscribe();
-    });
+    channel = supabase.channel('public:notifications')
+    .on(
+       'postgres_changes',
+       { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${currentUser.id}` },
+       (payload) => {
+           setUnreadCount(prev => prev + 1);
+       }
+    )
+    .subscribe();
 
     return () => {
         if(channel) supabase.removeChannel(channel);
         if (pressTimer.current) clearTimeout(pressTimer.current);
     };
 
-  }, []);
+  }, [currentUser]);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {

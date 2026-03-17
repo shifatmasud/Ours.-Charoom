@@ -7,14 +7,16 @@ import { theme, commonStyles } from '../../../Theme';
 import { Lightbox } from '../../Core/Lightbox';
 import { ChatHeader, ChatInput, MessageBubble } from './ChatPrimitives';
 
+import { useAuth } from '../../../contexts/AuthContext';
+
 interface DirectChatProps {
     friendId: string;
 }
 
 export const DirectChat: React.FC<DirectChatProps> = ({ friendId }) => {
+    const { user: currentUser } = useAuth();
     const navigate = useNavigate();
     const [messages, setMessages] = useState<Message[]>([]);
-    const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
     const [friendProfile, setFriendProfile] = useState<any>(null);
     const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -28,14 +30,11 @@ export const DirectChat: React.FC<DirectChatProps> = ({ friendId }) => {
     }, [messages.length]);
 
     useEffect(() => {
+        if (!currentUser) return;
         let ignore = false;
         let channel: any = null;
 
         const init = async () => {
-            const user = await api.getCurrentUser();
-            if (ignore) return;
-            setCurrentUser(user);
-
             // Fetch Messages
             const msgs = await api.getMessages(friendId);
             if (ignore) return;
@@ -46,13 +45,13 @@ export const DirectChat: React.FC<DirectChatProps> = ({ friendId }) => {
             setFriendProfile(friend);
 
             // Subscribe to DM updates
-            channel = supabase.channel(`dm:${user.id}:${friendId}`)
+            channel = supabase.channel(`dm:${currentUser.id}:${friendId}`)
                .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, payload => {
                    const msgRaw = payload.new;
                    const msg = parseMessageContent(msgRaw);
                    
                    // Only add incoming messages from the friend. My own messages are added optimistically.
-                   if (msg.sender_id === friendId && msg.receiver_id === user.id) {
+                   if (msg.sender_id === friendId && msg.receiver_id === currentUser.id) {
                         setMessages(prev => {
                            // Still good to keep the duplicate check for other race conditions
                            if (prev.find(m => m.id === msg.id)) return prev;
@@ -68,7 +67,7 @@ export const DirectChat: React.FC<DirectChatProps> = ({ friendId }) => {
             ignore = true; 
             if(channel) supabase.removeChannel(channel); 
         };
-    }, [friendId]);
+    }, [friendId, currentUser]);
 
     const handleSend = async (content: string, type: 'text'|'image'|'audio' = 'text', mediaUrl?: string) => {
         if (!currentUser) return;

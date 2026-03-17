@@ -9,11 +9,14 @@ import { theme, commonStyles } from '../../Theme';
 import { motion } from 'framer-motion';
 import { BrandedProgressBar } from '../Core/BrandedProgressBar';
 
+import { useAuth } from '../../contexts/AuthContext';
+
 interface ProfileWithMeta extends Profile {
   lastMessage?: Message | null;
 }
 
 export const MessagesList: React.FC = () => {
+  const { user: currentUser } = useAuth();
   const [profiles, setProfiles] = useState<ProfileWithMeta[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
@@ -21,10 +24,9 @@ export const MessagesList: React.FC = () => {
 
   useEffect(() => {
     const loadUsers = async () => {
+      if (!currentUser) return;
       try {
-        setProgress(10);
-        const currentUser = await api.getCurrentUser();
-        setProgress(30);
+        setProgress(20);
         const data = await api.getAllProfiles();
         setProgress(60);
         
@@ -48,16 +50,14 @@ export const MessagesList: React.FC = () => {
 
         setProfiles(profilesWithMessages);
         setProgress(100);
-        
-        // Slight delay to let the progress bar hit 100% visually
-        setTimeout(() => setLoading(false), 300);
+        setLoading(false);
       } catch (e) {
         console.error(e);
         setLoading(false);
       }
     };
     loadUsers();
-  }, []);
+  }, [currentUser]);
 
   const filteredProfiles = profiles.filter(p => 
     p.username.toLowerCase().includes(search.toLowerCase())

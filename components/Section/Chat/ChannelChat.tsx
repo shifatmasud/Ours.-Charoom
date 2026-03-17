@@ -7,10 +7,12 @@ import { theme, commonStyles, DS } from '../../../Theme';
 import { Lightbox } from '../../Core/Lightbox';
 import { ChatHeader, ChatInput, MessageBubble } from './ChatPrimitives';
 
+import { useAuth } from '../../../contexts/AuthContext';
+
 export const ChannelChat: React.FC = () => {
+    const { user: currentUser } = useAuth();
     const navigate = useNavigate();
     const [messages, setMessages] = useState<Message[]>([]);
-    const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
     const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -23,14 +25,11 @@ export const ChannelChat: React.FC = () => {
     }, [messages.length]);
 
     useEffect(() => {
+        if (!currentUser) return;
         let ignore = false;
         let channel: any = null;
 
         const init = async () => {
-            const user = await api.getCurrentUser();
-            if (ignore) return;
-            setCurrentUser(user);
-
             const msgs = await api.getMessages('codex');
             if (ignore) return;
             setMessages(msgs);
@@ -40,7 +39,7 @@ export const ChannelChat: React.FC = () => {
                   const newMsg = parseMessageContent(payload.new);
                   
                   // Only add messages from other users. My own messages are added optimistically.
-                  if (newMsg.sender_id === user.id) {
+                  if (newMsg.sender_id === currentUser.id) {
                     return;
                   }
 
@@ -57,7 +56,7 @@ export const ChannelChat: React.FC = () => {
             ignore = true; 
             if(channel) supabase.removeChannel(channel); 
         };
-    }, []);
+    }, [currentUser]);
 
     const handleSend = async (content: string, type: 'text'|'image'|'audio' = 'text', mediaUrl?: string) => {
         if (!currentUser) return;

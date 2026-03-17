@@ -11,12 +11,14 @@ import { theme, commonStyles } from '../../Theme';
 import { SlotCounter } from '../Core/SlotCounter';
 import { Loader } from '../Core/Loader';
 
+import { useAuth } from '../../contexts/AuthContext';
+
 export const Profile: React.FC = () => {
+  const { user: currentUser, setUser } = useAuth();
   const { userId } = useParams<{ userId: string }>();
   const navigate = useNavigate();
   
   const [profileUser, setProfileUser] = useState<UserProfile | null>(null);
-  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
@@ -30,13 +32,12 @@ export const Profile: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    if (!currentUser) return;
     const loadData = async () => {
       try {
         setLoading(true);
-        const myUser = await api.getCurrentUser();
-        setCurrentUser(myUser);
 
-        const targetId = userId || myUser.id;
+        const targetId = userId || currentUser.id;
         
         const [fetchedProfile, fetchedPosts] = await Promise.all([
           api.getUserProfile(targetId),
@@ -46,7 +47,7 @@ export const Profile: React.FC = () => {
         setProfileUser(fetchedProfile);
         setPosts(fetchedPosts);
         
-        if (targetId === myUser.id) {
+        if (targetId === currentUser.id) {
           setEditName(fetchedProfile.full_name || '');
           setEditBio(fetchedProfile.bio || '');
         }
@@ -58,7 +59,7 @@ export const Profile: React.FC = () => {
       }
     };
     loadData();
-  }, [userId]);
+  }, [userId, currentUser]);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
       if (e.target.files && e.target.files[0]) {
@@ -83,7 +84,7 @@ export const Profile: React.FC = () => {
         avatar_url: avatarUrl
       });
       setProfileUser(updatedUser);
-      setCurrentUser(updatedUser);
+      setUser(updatedUser);
       setIsEditing(false);
       
       // Reset upload state

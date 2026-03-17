@@ -72,6 +72,7 @@ export const api = {
   },
 
   signOut: async (): Promise<void> => {
+    localStorage.removeItem('sb_user_profile');
     await supabase.auth.signOut();
     window.location.href = '/';
   },
@@ -93,10 +94,13 @@ export const api = {
     // Fetch real-time counts directly from follows table - wrap in try/catch to prevent blocking
     const fetchCount = async (query: any) => {
         try {
-            const { count, error } = await query;
+            // Add a 5s timeout for count queries
+            const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 5000));
+            const { count, error } = await Promise.race([query, timeoutPromise]) as any;
             if (error) return 0;
             return count || 0;
         } catch (e) {
+            console.warn('Count fetch timed out or failed:', e);
             return 0;
         }
     };

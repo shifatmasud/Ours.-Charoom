@@ -20,15 +20,35 @@ const AuthContext = createContext<AuthContextType>({
 export const useAuth = () => useContext(AuthContext);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<CurrentUser | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState<CurrentUser | null>(() => {
+    // Optimistic hydration from localStorage
+    try {
+      const savedUser = localStorage.getItem('auth_user');
+      return savedUser ? JSON.parse(savedUser) : null;
+    } catch (e) {
+      return null;
+    }
+  });
+  const [loading, setLoading] = useState(() => {
+    // If we have a cached user, we can skip the initial full-screen loader
+    return !localStorage.getItem('auth_user');
+  });
+
+  const updateUserInfo = (newUser: CurrentUser | null) => {
+    setUser(newUser);
+    if (newUser) {
+      localStorage.setItem('auth_user', JSON.stringify(newUser));
+    } else {
+      localStorage.removeItem('auth_user');
+    }
+  };
 
   const refreshAuth = async (isRetry = false) => {
     let timeoutId: any;
     try {
-      // Safety timeout for refreshAuth
+      // Increased safety timeout for refreshAuth to 30s
       const timeoutPromise = new Promise((_, reject) => {
-        timeoutId = setTimeout(() => reject(new Error('Refresh auth timeout')), 15000);
+        timeoutId = setTimeout(() => reject(new Error('Refresh auth timeout')), 30000);
       });
 
       const currentUser = await Promise.race([
@@ -36,7 +56,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         timeoutPromise
       ]) as CurrentUser;
 
-      setUser(currentUser);
+      updateUserInfo(currentUser);
     } catch (e) {
       console.error('Refresh auth failed:', e);
       
@@ -47,11 +67,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return refreshAuth(true);
       }
 
-      // If we already have a user (e.g. from Login page), don't clear it on timeout
-      if (e instanceof Error && e.message === 'Refresh auth timeout') {
-        // Just log and continue, don't clear user
+      // If we already have a user (e.g. from localStorage or Login), don't clear it on timeout
+      // This prevents the app from logging the user out just because of a slow network
+      if (e instanceof Error && (e.message === 'Refresh auth timeout' || e.message.includes('timeout'))) {
+        console.warn('Auth refresh timed out, keeping existing session if available');
       } else {
-        setUser(null);
+        // Only clear user on explicit auth errors (401, etc)
+        updateUserInfo(null);
       }
     } finally {
       if (timeoutId) clearTimeout(timeoutId);
@@ -101,11 +123,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (mounted) await refreshAuth();
       } else if (event === 'SIGNED_OUT') {
         if (mounted) {
-          setUser(null);
+          updateUserInfo(null);
           setLoading(false);
         }
       } else if (event === 'INITIAL_SESSION') {
-        if (!session && mounted) setLoading(false);
+        if (!session && mounted) {
+          updateUserInfo(null);
+          setLoading(false);
+        }
       }
     });
 
@@ -117,7 +142,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, loading, refreshAuth, setUser }}>
+    <AuthContext.Provider value={{ user, loading, refreshAuth, setUser: updateUserInfo }}>
       {children}
     </AuthContext.Provider>
   );

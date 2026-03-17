@@ -12,18 +12,86 @@ export const DirectCall: React.FC = () => {
   const { user: currentUser } = useAuth();
   const { roomId } = useParams<{ roomId: string }>();
   const navigate = useNavigate();
+  const [useJitsi, setUseJitsi] = useState(true);
 
-  useEffect(() => {
-    // Redirect to Zoom meeting
-    // Note: A real Zoom integration requires a backend to generate JWT signatures.
-    // For now, we redirect to a generic Zoom join URL.
-    window.location.href = `https://zoom.us/wc/join/${roomId?.replace(/[^0-9]/g, '').substring(0, 10) || '1234567890'}`;
-  }, [roomId]);
+  // Direction 1: Jitsi Meet (Managed UI, easiest)
+  // Direction 2: Daily.co (Customizable SDK, high quality)
+  // Direction 3: WebRTC + PeerJS (Full custom P2P control)
+
+  if (!roomId) return null;
 
   return (
-    <div style={{ ...commonStyles.pageContainer, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#000', height: '100vh', flexDirection: 'column', gap: '20px' }}>
-      <p style={{ color: 'white' }}>Redirecting to Zoom...</p>
-      <button onClick={() => navigate(-1)} style={{ padding: '10px 20px', background: theme.colors.surface2, color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer' }}>Go Back</button>
-    </div>
+    <motion.div 
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      style={{ 
+        ...commonStyles.pageContainer, 
+        display: 'flex', 
+        alignItems: 'center', 
+        justifyContent: 'center', 
+        background: '#000', 
+        height: '100vh', 
+        width: '100vw',
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        zIndex: 9999
+      }}
+    >
+      {useJitsi ? (
+        <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+          <JitsiMeeting
+            domain="meet.jit.si"
+            roomName={roomId}
+            configOverwrite={{
+              startWithAudioMuted: true,
+              disableModeratorIndicator: true,
+              startScreenSharing: false,
+              enableEmailInStats: false
+            }}
+            interfaceConfigOverwrite={{
+              DISABLE_JOIN_LEAVE_NOTIFICATIONS: true
+            }}
+            userInfo={{
+              displayName: currentUser?.full_name || 'User',
+              email: ''
+            }}
+            onApiReady={(externalApi) => {
+              // setup event listeners
+              externalApi.addEventListener('videoConferenceLeft', () => {
+                navigate(-1);
+              });
+            }}
+            getIFrameRef={(iframeRef) => {
+              iframeRef.style.height = '100%';
+              iframeRef.style.width = '100%';
+            }}
+          />
+          <button 
+            onClick={() => navigate(-1)} 
+            style={{ 
+              position: 'absolute', 
+              top: '20px', 
+              left: '20px', 
+              zIndex: 10000,
+              padding: '8px 16px', 
+              background: 'rgba(0,0,0,0.5)', 
+              color: 'white', 
+              border: '1px solid rgba(255,255,255,0.2)', 
+              borderRadius: '8px', 
+              cursor: 'pointer',
+              backdropFilter: 'blur(10px)'
+            }}
+          >
+            Exit Call
+          </button>
+        </div>
+      ) : (
+        <div style={{ textAlign: 'center', color: 'white' }}>
+          <p>Redirecting to external call...</p>
+          <button onClick={() => navigate(-1)} style={{ padding: '10px 20px', background: theme.colors.surface2, color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer' }}>Go Back</button>
+        </div>
+      )}
+    </motion.div>
   );
 };

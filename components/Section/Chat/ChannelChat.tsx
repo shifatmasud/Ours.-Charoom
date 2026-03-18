@@ -86,7 +86,7 @@ export const ChannelChat: React.FC = () => {
 
     return (
         <>
-            <Lightbox isOpen={!!lightboxSrc} src={lightboxSrc || ''} onClose={() => setLightboxSrc(null)} />
+            {lightboxSrc && <Lightbox isOpen={true} src={lightboxSrc} onClose={() => setLightboxSrc(null)} />}
             <motion.div 
               {...theme.motion.page}
               style={{ 

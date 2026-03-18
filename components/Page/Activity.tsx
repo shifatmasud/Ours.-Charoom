@@ -54,25 +54,22 @@ export const Activity: React.FC = () => {
     load();
     
     // Real-time Subscription
-    let channel: any;
-    if (user) {
-        // Use a more specific, stable channel name
-        channel = supabase.channel(`notifications:${user.id}`)
-            .on(
-                'postgres_changes',
-                { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` },
-                async (payload) => {
-                    console.log("Activity: Real-time notification received", payload);
-                    await fetchNotifications(); // Refresh on new item
-                }
-            )
-            .subscribe((status, err) => {
+    // Listen to all notifications
+    const channel = supabase.channel('notifications:all')
+        .on(
+            'postgres_changes',
+            { event: 'INSERT', schema: 'public', table: 'notifications' },
+            async (payload) => {
+                console.log("Activity: Real-time notification received", payload);
+                await fetchNotifications(); // Refresh on new item
+            }
+        )
+        .subscribe((status, err) => {
                 console.log("Activity: Subscription status:", status, err);
                 if (status === 'CHANNEL_ERROR') {
                     console.error("Activity: Channel error:", err);
                 }
             });
-    }
 
     return () => {
         mounted = false;

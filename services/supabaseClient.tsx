@@ -502,18 +502,15 @@ export const api = {
 
   // --- Notifications ---
   getNotifications: async (): Promise<Notification[]> => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return [];
+      // No longer filtering by user_id to make notifications public
       
       try {
-          console.log("Activity: Querying notifications for user:", user.id);
+          console.log("Activity: Querying all notifications...");
           const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000));
           
-          // Simplified query to isolate if the join is the issue
           const { data, error } = await Promise.race([
               supabase.from('notifications')
                 .select('*')
-                .eq('user_id', user.id)
                 .order('created_at', { ascending: false }),
               timeout
           ]) as any;

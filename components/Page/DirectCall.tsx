@@ -390,6 +390,7 @@ export const DirectCall: React.FC = () => {
                   padding: '12px',
                   borderRadius: '24px',
                   backdropFilter: DS.Effect.Blur.Frosted,
+                  WebkitBackdropFilter: DS.Effect.Blur.Frosted,
                   border: '1px solid rgba(255,255,255,0.1)',
                 }}
               >

@@ -109,7 +109,7 @@ export const DirectChat: React.FC<DirectChatProps> = ({ friendId }) => {
 
     return (
         <>
-            {lightboxSrc && <Lightbox isOpen={true} src={lightboxSrc} onClose={() => setLightboxSrc(null)} />}
+            <Lightbox isOpen={!!lightboxSrc} src={lightboxSrc || ''} onClose={() => setLightboxSrc(null)} />
             <div 
               style={{ 
                 display: 'flex', flexDirection: 'column', height: '100dvh', 

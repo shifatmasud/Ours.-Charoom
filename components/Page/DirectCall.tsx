@@ -196,7 +196,7 @@ export const DirectCall: React.FC = () => {
           } catch (pubError) {
             console.error('Failed to publish tracks:', pubError);
           }
-        }, 500);
+        }, 1000);
 
         setRemoteParticipants(Array.from(r.remoteParticipants.values()));
         setLoading(false);
@@ -236,12 +236,20 @@ export const DirectCall: React.FC = () => {
 
   const toggleScreenShare = async () => {
     if (!room) return;
+    
+    // Check support
+    if (!navigator.mediaDevices || !('getDisplayMedia' in navigator.mediaDevices)) {
+      setError("Screen sharing is not supported in this browser.");
+      return;
+    }
+
     try {
       const enabled = !isScreenSharing;
       await room.localParticipant.setScreenShareEnabled(enabled);
       setIsScreenSharing(enabled);
     } catch (e) {
       console.error('Screen share error:', e);
+      setError("Failed to share screen. Please ensure you have granted permission.");
     }
   };
 

@@ -37,7 +37,6 @@ const AnimatedRoutes = () => {
   const location = useLocation();
 
   return (
-    <AnimatePresence mode="wait">
       <motion.div 
         key={location.pathname}
         initial={{ opacity: 0 }}
@@ -49,19 +48,16 @@ const AnimatedRoutes = () => {
         <Routes location={location}>
           <Route path="/login" element={<Login />} />
           
-          {/* Public Routes */}
-          <Route path="/" element={<Feed />} />
-          <Route path="/profile/:userId" element={<Profile />} />
-          <Route path="/post/:postId" element={<PostDetail />} />
-          
           {/* Protected Routes */}
+          <Route path="/" element={<RequireAuth><Feed /></RequireAuth>} />
+          <Route path="/profile/:userId" element={<RequireAuth><Profile /></RequireAuth>} />
+          <Route path="/post/:postId" element={<RequireAuth><PostDetail /></RequireAuth>} />
           <Route path="/messages" element={<RequireAuth><MessagesList /></RequireAuth>} />
           <Route path="/messages/:friendId" element={<RequireAuth><ChatWindow /></RequireAuth>} />
           <Route path="/call/:roomId" element={<RequireAuth><DirectCall /></RequireAuth>} />
           <Route path="/activity" element={<RequireAuth><Activity /></RequireAuth>} />
         </Routes>
       </motion.div>
-    </AnimatePresence>
   );
 };
 
@@ -110,7 +106,6 @@ const NotificationContainer = () => {
 
 const AppLayout: React.FC = () => {
   const { user } = useAuth();
-  const location = useLocation();
   
   return (
     <div style={{ 
@@ -125,8 +120,8 @@ const AppLayout: React.FC = () => {
     }}>
       <NotificationContainer />
       <AnimatedRoutes />
-      {/* Show Nav if not on login page (Nav handles its own visibility for details) */}
-      {location.pathname !== '/login' && <Nav />}
+      {/* Only show Nav if logged in and not on login page */}
+      {user && <Nav />}
     </div>
   );
 };

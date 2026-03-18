@@ -26,6 +26,11 @@ export const DirectChat: React.FC<DirectChatProps> = ({ friendId }) => {
     };
 
     useEffect(() => {
+        console.log("DirectChat mounted");
+        return () => console.log("DirectChat unmounted");
+    }, []);
+
+    useEffect(() => {
         setTimeout(scrollToBottom, 100);
     }, [messages.length]);
 
@@ -71,6 +76,7 @@ export const DirectChat: React.FC<DirectChatProps> = ({ friendId }) => {
 
     const handleSend = async (content: string, type: 'text'|'image'|'audio' = 'text', mediaUrl?: string) => {
         if (!currentUser) return;
+        console.log("handleSend called", content, type);
         
         // Optimistic UI Update with local ID
         const tempId = `local_${Date.now()}_${Math.random()}`;
@@ -83,16 +89,15 @@ export const DirectChat: React.FC<DirectChatProps> = ({ friendId }) => {
             media_url: mediaUrl,
             created_at: new Date().toISOString()
         };
+        console.log("Adding optimistic message", optimisticMsg);
         setMessages(prev => [...prev, optimisticMsg]);
 
         try {
-            const realMsg = await api.sendMessage(currentUser.id, friendId, content, type, mediaUrl);
-            // Replace optimistic message with real one to avoid duplicates when subscription triggers
-            setMessages(prev => prev.map(m => m.id === tempId ? realMsg : m));
+            console.log("Calling api.sendMessage");
+            await api.sendMessage(currentUser.id, friendId, content, type, mediaUrl);
+            console.log("api.sendMessage success");
         } catch (e) {
             console.error("Send failed", e);
-            // Optionally remove optimistic message or show error
-            setMessages(prev => prev.filter(m => m.id !== tempId));
         }
     };
 
@@ -105,11 +110,10 @@ export const DirectChat: React.FC<DirectChatProps> = ({ friendId }) => {
     return (
         <>
             <Lightbox isOpen={!!lightboxSrc} src={lightboxSrc || ''} onClose={() => setLightboxSrc(null)} />
-            <motion.div 
-              {...theme.motion.page}
+            <div 
               style={{ 
                 display: 'flex', flexDirection: 'column', height: '100dvh', 
-                background: theme.colors.surface1, width: '100%', maxWidth: theme.layout.maxWidth, margin: '0 auto', position: 'relative', overflow: 'hidden'
+                background: 'red', width: '100%', maxWidth: theme.layout.maxWidth, margin: '0 auto', position: 'relative', overflow: 'hidden'
               }}
             >
                 <ChatHeader title={friendProfile?.username || 'Chat'} onCall={startCall} />
@@ -134,7 +138,7 @@ export const DirectChat: React.FC<DirectChatProps> = ({ friendId }) => {
                 </div>
 
                 <ChatInput onSend={handleSend} />
-            </motion.div>
+            </div>
         </>
     );
 };

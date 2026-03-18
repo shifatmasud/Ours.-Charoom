@@ -62,7 +62,7 @@ export const Lightbox: React.FC<LightboxProps> = ({ isOpen, src, onClose, type =
             onClick={(e) => e.stopPropagation()}
           >
             {type === 'video' ? (
-               <motion.video 
+               src && <motion.video 
                  layoutId={layoutId}
                  src={src} 
                  controls 
@@ -71,7 +71,7 @@ export const Lightbox: React.FC<LightboxProps> = ({ isOpen, src, onClose, type =
                  style={{ maxWidth: '100%', maxHeight: '90vh', borderRadius: DS.Radius.M }} 
                />
             ) : (
-               <motion.img 
+               src && <motion.img 
                  layoutId={layoutId}
                  src={src} 
                  alt="Full view" 

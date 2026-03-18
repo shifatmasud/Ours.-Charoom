@@ -77,7 +77,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({ src, style }) => {
         color: '#18181B', // Zinc-900 for high contrast text
         ...style
     }}>
-      <audio ref={audioRef} src={src} preload="metadata" />
+      {src && <audio ref={audioRef} src={src} preload="metadata" />}
       
       {/* Play/Pause Toggle */}
       <button 

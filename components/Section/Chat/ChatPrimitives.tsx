@@ -92,7 +92,7 @@ export const MessageBubble: React.FC<{
               overflow: 'hidden'
             }}
           >
-            {msg.type === 'image' ? (
+            {msg.type === 'image' && msg.media_url ? (
                 <img 
                   src={msg.media_url} 
                   alt="attachment" 

@@ -67,7 +67,14 @@ export const Activity: React.FC = () => {
             .subscribe((status, err) => {
                 console.log("Activity: Subscription status:", status, err);
                 if (status === 'CHANNEL_ERROR') {
-                    console.error("Activity: Channel error:", err);
+                    console.error("Activity: Channel error details:", JSON.stringify(err, null, 2));
+                    // Simple retry mechanism
+                    setTimeout(() => {
+                        if (channel) {
+                            console.log("Activity: Retrying subscription...");
+                            channel.subscribe();
+                        }
+                    }, 5000);
                 }
             });
     }

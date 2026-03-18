@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { DS } from '../../Theme';
-import { api } from '../../services/supabaseClient';
+import { api, supabase } from '../../services/supabaseClient';
 import { useNavigate } from 'react-router-dom';
 import { User, Key, SignIn, WarningCircle, IdentificationCard, PaperPlaneRight, ArrowLeft, Lock } from '@phosphor-icons/react';
 import { Button } from '../Core/Button';
@@ -27,11 +27,26 @@ export const Login: React.FC = () => {
   const [newPassword, setNewPassword] = useState('');
   const [fullName, setFullName] = useState('');
 
+  const [isSessionReady, setIsSessionReady] = useState(false);
+
   useEffect(() => {
     const hash = window.location.hash;
     if (hash.includes('type=recovery')) {
       setView('update-password');
     }
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (session) {
+        setIsSessionReady(true);
+      }
+    });
+    
+    // Check initial session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) setIsSessionReady(true);
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
   const handleSwitchView = (newView: AuthView) => {
@@ -57,6 +72,9 @@ export const Login: React.FC = () => {
             await api.resetPassword(email);
             setSuccessMsg("Check your email for reset instructions.");
         } else if (view === 'update-password') {
+            if (!isSessionReady) {
+                throw new Error("Session not ready, please wait a moment...");
+            }
             if (!newPassword.trim()) throw new Error("New password is required");
             await api.updatePassword(newPassword);
             setSuccessMsg("Password updated successfully! Redirecting...");

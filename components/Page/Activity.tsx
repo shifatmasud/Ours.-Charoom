@@ -19,7 +19,9 @@ export const Activity: React.FC = () => {
 
   const fetchNotifications = async () => {
      try {
+         console.log("Activity: Fetching notifications...");
          const data = await api.getNotifications();
+         console.log("Activity: Fetched notifications:", data);
          setNotifications(data);
      } catch (e) {
          console.error("Failed to load notifications", e);
@@ -61,7 +63,7 @@ export const Activity: React.FC = () => {
                 { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` },
                 async (payload) => {
                     console.log("Activity: Real-time notification received", payload);
-                    if (mounted) await fetchNotifications(); // Refresh on new item
+                    await fetchNotifications(); // Refresh on new item
                 }
             )
             .subscribe((status, err) => {

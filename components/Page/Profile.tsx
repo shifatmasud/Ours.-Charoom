@@ -32,6 +32,7 @@ export const Profile: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    if (!currentUser) return;
     let mounted = true;
     let profileTimeout: any;
 
@@ -47,11 +48,7 @@ export const Profile: React.FC = () => {
           }
         }, 5000);
 
-        const targetId = userId || currentUser?.id;
-        if (!targetId) {
-            setLoading(false);
-            return;
-        }
+        const targetId = userId || currentUser.id;
         
         const [fetchedProfile, fetchedPosts] = await Promise.all([
           api.getUserProfile(targetId),
@@ -62,7 +59,7 @@ export const Profile: React.FC = () => {
           setProfileUser(fetchedProfile);
           setPosts(fetchedPosts);
           
-          if (currentUser && targetId === currentUser.id) {
+          if (targetId === currentUser.id) {
             setEditName(fetchedProfile.full_name || '');
             setEditBio(fetchedProfile.bio || '');
           }
@@ -118,11 +115,7 @@ export const Profile: React.FC = () => {
   };
 
   const handleFollowToggle = async () => {
-    if (!currentUser) {
-        navigate('/login');
-        return;
-    }
-    if (!profileUser) return;
+    if (!currentUser || !profileUser) return;
     try {
       if (profileUser.is_following) {
         await api.unfollowUser(currentUser.id, profileUser.id);
@@ -137,10 +130,6 @@ export const Profile: React.FC = () => {
   };
 
   const handleMessage = () => {
-    if (!currentUser) {
-        navigate('/login');
-        return;
-    }
     if (profileUser) {
       navigate(`/messages/${profileUser.id}`);
     }
@@ -150,9 +139,9 @@ export const Profile: React.FC = () => {
     return <Loader fullscreen label="FETCHING PROFILE" />;
   }
 
-  if (!profileUser) return null;
+  if (!profileUser || !currentUser) return null;
 
-  const isMyProfile = currentUser && profileUser.id === currentUser.id;
+  const isMyProfile = profileUser.id === currentUser.id;
 
   return (
     // Removed motion page transitions from root to keep header static
@@ -301,7 +290,7 @@ export const Profile: React.FC = () => {
                   style={{ position: 'relative', aspectRatio: '1/1', cursor: 'pointer', overflow: 'hidden', backgroundColor: theme.colors.surface2 }}
                >
                  <img 
-                   src={post.image_url} 
+                   src={post.image_url || 'https://picsum.photos/seed/placeholder/100/100'} 
                    alt="User Post" 
                    style={{ width: '100%', height: '100%', objectFit: 'cover', transition: 'transform 0.3s' }} 
                  />

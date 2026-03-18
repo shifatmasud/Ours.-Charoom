@@ -53,8 +53,8 @@ export const Activity: React.FC = () => {
     
     // Real-time Subscription
     let channel: any;
-    if (user) {
-        // Use a more specific, stable channel name
+    const subscribe = () => {
+        if (!user) return;
         channel = supabase.channel(`notifications:${user.id}`)
             .on(
                 'postgres_changes',
@@ -68,8 +68,18 @@ export const Activity: React.FC = () => {
                 console.log("Activity: Subscription status:", status, err);
                 if (status === 'CHANNEL_ERROR') {
                     console.error("Activity: Channel error:", err);
+                    if (channel) supabase.removeChannel(channel);
+                    setTimeout(() => {
+                        if (mounted) {
+                            console.log("Activity: Retrying subscription...");
+                            subscribe();
+                        }
+                    }, 5000);
                 }
             });
+    };
+    if (user) {
+        subscribe();
     }
 
     return () => {

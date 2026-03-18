@@ -11,8 +11,7 @@ interface AvatarProps {
 }
 
 export const Avatar: React.FC<AvatarProps> = ({ src, alt, size = 'md', bordered = false, style }) => {
-  const [imgSrc, setImgSrc] = useState(src);
-  const [hasError, setHasError] = useState(false);
+  const [hasError, setHasError] = useState(!src || src === '');
 
   const sizeMap = {
     sm: '32px',
@@ -48,15 +47,14 @@ export const Avatar: React.FC<AvatarProps> = ({ src, alt, size = 'md', bordered 
   const handleError = () => {
     if (!hasError) {
        setHasError(true);
-       // Fallback to a generative colored placeholder
     }
   };
 
   return (
     <div style={wrapperStyle}>
-      {!hasError ? (
+      {!hasError && src ? (
         <img 
-          src={imgSrc} 
+          src={src} 
           alt={alt} 
           style={imgStyle} 
           onError={handleError}

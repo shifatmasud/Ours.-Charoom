@@ -46,7 +46,7 @@ export const NotificationsPage: React.FC = () => {
 
   return (
     <div style={{ padding: '24px', maxWidth: '600px', margin: '0 auto' }}>
-      <h1 style={{ ...DS.Type.Expressive.Heading, marginBottom: '24px' }}>Notifications</h1>
+      <h1 style={{ ...DS.Type.Expressive.Display, fontSize: '32px', marginBottom: '24px' }}>Notifications</h1>
       
       {loading ? (
         <div style={{ color: DS.Color.Base.Content[3] }}>Loading...</div>

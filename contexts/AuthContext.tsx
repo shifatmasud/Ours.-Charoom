@@ -8,13 +8,15 @@ interface AuthContextType {
   loading: boolean;
   refreshAuth: () => Promise<void>;
   setUser: (user: CurrentUser | null) => void;
+  connectionError: string | null;
 }
 
 const AuthContext = createContext<AuthContextType>({ 
   user: null, 
   loading: true,
   refreshAuth: async () => {},
-  setUser: () => {}
+  setUser: () => {},
+  connectionError: null
 });
 
 export const useAuth = () => useContext(AuthContext);
@@ -35,6 +37,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     console.log('Auth: Initial loading state:', !hasCache);
     return !hasCache;
   });
+  const [connectionError, setConnectionError] = useState<string | null>(null);
 
   const updateUserInfo = (newUser: CurrentUser | null) => {
     console.log('Auth: Updating user info:', newUser?.id || 'null');
@@ -50,6 +53,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     console.log('Auth: Refreshing auth...');
     let timeoutId: any;
     try {
+      setConnectionError(null);
       // 5s safety timeout - will not throw, just resolve null to allow app to continue
       const timeoutPromise = new Promise((resolve) => {
         timeoutId = setTimeout(() => {
@@ -66,8 +70,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (currentUser) {
         updateUserInfo(currentUser);
       }
-    } catch (e) {
-      console.error('Auth: Refresh auth failed with error:', e);
+    } catch (e: any) {
+      // Don't log loud errors for expected connection issues with the default project
+      if (e.silent || (e.message && e.message.includes('default Supabase project'))) {
+        console.warn('Auth: Refresh auth using fallback due to connection issue:', e.message);
+      } else {
+        console.error('Auth: Refresh auth failed with error:', e);
+      }
+      
+      // Check for connection errors specifically
+      if (e.message && e.message.includes('Unable to connect')) {
+        setConnectionError(e.message);
+      }
+
       // Only clear user on explicit auth errors (e.g. 401 Unauthorized)
       // If it's a network error, we keep the cached user
       if (e instanceof Error && (e.message.includes('401') || e.message.includes('unauthorized'))) {
@@ -150,7 +165,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, loading, refreshAuth, setUser: updateUserInfo }}>
+    <AuthContext.Provider value={{ user, loading, refreshAuth, setUser: updateUserInfo, connectionError }}>
       {children}
     </AuthContext.Provider>
   );

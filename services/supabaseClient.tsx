@@ -3,8 +3,84 @@ import { createClient } from '@supabase/supabase-js';
 import { Post, Message, Notification, Profile, CurrentUser, Comment } from '../types';
 
 // --- Configuration ---
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://lezvekpflqbxornefbwh.supabase.co';
+const DEFAULT_URL = 'https://lezvekpflqbxornefbwh.supabase.co';
+const RAW_URL = import.meta.env.VITE_SUPABASE_URL || DEFAULT_URL;
+// Normalize URL: remove trailing slash if present
+const SUPABASE_URL = RAW_URL.endsWith('/') ? RAW_URL.slice(0, -1) : RAW_URL;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxlenZla3BmbHFieG9ybmVmYndoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM3MDM1OTEsImV4cCI6MjA3OTI3OTU5MX0._fN9MxAivt_GyYv81lR7VJUShAPnYQ5txynHxwyrftw';
+
+const isDefaultUrl = SUPABASE_URL === DEFAULT_URL;
+const IS_MOCK_MODE = typeof window !== 'undefined' && localStorage.getItem('supabase_mock_mode') === 'true';
+
+if (isDefaultUrl && !IS_MOCK_MODE) {
+  console.warn('⚠️ Using default Supabase URL. If you encounter "Failed to fetch", please set your own VITE_SUPABASE_URL and VITE_SUPABASE_KEY in the project settings.');
+}
+
+// --- Mock Data ---
+const MOCK_USER: CurrentUser = {
+    id: 'mock-user-id',
+    username: 'demo_user',
+    full_name: 'Demo User',
+    avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=demo',
+    bio: 'This is a demo account because the default Supabase project is unreachable.',
+    followers_count: 42,
+    following_count: 12
+};
+
+const MOCK_POSTS: Post[] = [
+    {
+        id: 'mock-post-1',
+        user_id: 'mock-user-id',
+        image_url: 'https://picsum.photos/seed/demo1/600/600',
+        caption: 'Welcome to the demo mode! The backend is currently unreachable, so we are showing some sample data.',
+        created_at: new Date().toISOString(),
+        profiles: MOCK_USER,
+        likes_count: 10,
+        comments_count: 2,
+        has_liked: false
+    },
+    {
+        id: 'mock-post-2',
+        user_id: 'other-user-id',
+        image_url: 'https://picsum.photos/seed/demo2/600/600',
+        caption: 'You can still explore the UI and see how everything looks.',
+        created_at: new Date(Date.now() - 3600000).toISOString(),
+        profiles: {
+            id: 'other-user-id',
+            username: 'traveler',
+            full_name: 'World Traveler',
+            avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=traveler'
+        },
+        likes_count: 25,
+        comments_count: 5,
+        has_liked: true
+    }
+];
+
+// Helper to handle "Failed to fetch" errors consistently
+const handleSupabaseError = (err: any) => {
+  const isFetchError = err.message === 'Failed to fetch' || 
+                      (err.name === 'TypeError' && err.message.includes('fetch')) ||
+                      (err.message && err.message.toLowerCase().includes('failed to fetch')) ||
+                      err.message === 'timeout';
+  
+  if (isFetchError) {
+    if (isDefaultUrl) {
+        // Automatically enable mock mode for future requests if we're on the default URL
+        if (typeof window !== 'undefined') {
+            localStorage.setItem('supabase_mock_mode', 'true');
+        }
+        const msg = 'Unable to connect to the default Supabase project. Switching to Demo Mode...';
+        const error = new Error(msg) as any;
+        error.isDefaultUrlError = true;
+        error.silent = true;
+        throw error;
+    }
+    const msg = 'Unable to connect to your Supabase project. Please check if your VITE_SUPABASE_URL is correct and the project is active.';
+    throw new Error(msg);
+  }
+  throw err;
+};
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: {
@@ -53,7 +129,8 @@ export const parseMessageContent = (msg: any): Message => {
 export const api = {
   sendNotification: async (userId: string, senderId: string, type: 'like' | 'comment' | 'follow', referenceId: string, mediaUrl?: string): Promise<void> => {
       try {
-          await fetch('https://lezvekpflqbxornefbwh.supabase.co/functions/v1/send-notification', {
+          // Try Edge Function first
+          const response = await fetch(`${SUPABASE_URL}/functions/v1/send-notification`, {
               method: 'POST',
               headers: {
                   'Content-Type': 'application/json',
@@ -67,38 +144,66 @@ export const api = {
                   media_url: mediaUrl 
               })
           });
-      } catch (e) {
-          console.error("Failed to send notification via Edge Function", e);
+
+          if (!response.ok) {
+              throw new Error(`Edge Function returned ${response.status}`);
+          }
+      } catch (e: any) {
+          console.warn("Edge Function failed or missing, falling back to direct DB insert", e);
+          // Fallback: Direct insert into notifications table
+          try {
+              const { error } = await supabase.from('notifications').insert({
+                  user_id: userId,
+                  sender_id: senderId,
+                  type,
+                  reference_id: referenceId,
+                  media_url: mediaUrl,
+                  is_read: false
+              });
+              if (error) throw error;
+          } catch (dbErr: any) {
+              console.error("Direct notification insert also failed", dbErr);
+              // Don't throw here to avoid breaking the main action (like/comment)
+              // but we log it for debugging
+          }
       }
   },
 
   // --- Auth ---
   signUpWithEmail: async (email: string, pass: string, fullName: string): Promise<void> => {
-    const { error } = await supabase.auth.signUp({
-      email,
-      password: pass,
-      options: { data: { full_name: fullName } }
-    });
-    if (error) throw error;
+    try {
+      const { error } = await supabase.auth.signUp({
+        email,
+        password: pass,
+        options: { data: { full_name: fullName } }
+      });
+      if (error) throw error;
+    } catch (err: any) {
+      handleSupabaseError(err);
+    }
   },
 
   signInWithPassword: async (email: string, pass: string): Promise<CurrentUser> => {
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password: pass });
-    if (error) throw error;
-    
-    // Fetch or construct profile - pass the user object to avoid redundant network calls
-    const profile = await api.getUserProfile(data.user.id, data.user).catch(() => null);
-    
-    if (!profile) {
-        // Fallback using auth metadata if profile row is missing
-        return {
-            id: data.user.id,
-            username: data.user.user_metadata?.full_name?.replace(/\s+/g, '_').toLowerCase() || email.split('@')[0],
-            avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${data.user.id}`,
-            full_name: data.user.user_metadata?.full_name || email.split('@')[0]
-        };
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password: pass });
+      if (error) throw error;
+      
+      // Fetch or construct profile - pass the user object to avoid redundant network calls
+      const profile = await api.getUserProfile(data.user.id, data.user).catch(() => null);
+      
+      if (!profile) {
+          // Fallback using auth metadata if profile row is missing
+          return {
+              id: data.user.id,
+              username: data.user.user_metadata?.full_name?.replace(/\s+/g, '_').toLowerCase() || email.split('@')[0],
+              avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${data.user.id}`,
+              full_name: data.user.user_metadata?.full_name || email.split('@')[0]
+          };
+      }
+      return profile;
+    } catch (err: any) {
+      handleSupabaseError(err);
     }
-    return profile;
   },
 
   resetPassword: async (email: string): Promise<void> => {
@@ -118,70 +223,95 @@ export const api = {
   },
 
   getCurrentUser: async (): Promise<CurrentUser> => {
-    // Use getSession first as it's faster (local storage)
-    const { data: sessionData } = await supabase.auth.getSession();
-    let user = sessionData?.session?.user;
-    
-    if (!user) {
-        const { data: authData, error: authError } = await supabase.auth.getUser();
-        if (authError || !authData?.user) throw authError || new Error('No user logged in');
-        user = authData.user;
+    if (IS_MOCK_MODE) return MOCK_USER;
+    try {
+        // Use getSession first as it's faster (local storage)
+        const { data: sessionData } = await supabase.auth.getSession();
+        let user = sessionData?.session?.user;
+        
+        if (!user) {
+            const { data: authData, error: authError } = await supabase.auth.getUser();
+            if (authError || !authData?.user) throw authError || new Error('No user logged in');
+            user = authData.user;
+        }
+        
+        // Fetch profile data with a 5s timeout
+        const fetchProfile = async () => {
+            try {
+                const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000));
+                const { data, error } = await Promise.race([
+                    supabase.from('profiles').select('*').eq('id', user.id).maybeSingle(),
+                    timeout
+                ]) as any;
+                if (error) {
+                    console.error('Error fetching profile:', error);
+                    handleSupabaseError(error);
+                }
+                return data;
+            } catch (e) {
+                if (e instanceof Error && e.message === 'timeout') {
+                    console.warn('Profile fetch timed out, using fallback');
+                    return null;
+                }
+                // Re-throw if it's a fetch error we want to handle at the top level
+                throw e;
+            }
+        };
+
+        const data = await fetchProfile();
+        
+        // Fetch real-time counts directly from follows table - wrap in try/catch to prevent blocking
+        const fetchCount = async (query: any) => {
+            try {
+                // Add a 5s timeout for count queries
+                const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 5000));
+                const { count, error } = await Promise.race([query, timeoutPromise]) as any;
+                if (error) {
+                    handleSupabaseError(error);
+                    return 0;
+                }
+                return count || 0;
+            } catch (e) {
+                console.warn('Count fetch timed out or failed:', e);
+                return 0;
+            }
+        };
+
+        const followersPromise = fetchCount(supabase
+            .from('follows')
+            .select('*', { count: 'exact', head: true })
+            .eq('following_id', user.id));
+
+        const followingPromise = fetchCount(supabase
+            .from('follows')
+            .select('*', { count: 'exact', head: true })
+            .eq('follower_id', user.id));
+        
+        const [followersCount, followingCount] = await Promise.all([followersPromise, followingPromise]);
+        
+        // Return merged data or fallback from auth metadata
+        return {
+            id: user.id,
+            username: data?.username || user.user_metadata?.full_name?.replace(/\s+/g, '_').toLowerCase() || user.email?.split('@')[0] || 'user',
+            avatar_url: data?.avatar_url || user.user_metadata?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.id}`,
+            full_name: data?.full_name || user.user_metadata?.full_name || user.email?.split('@')[0] || 'Anonymous',
+            bio: data?.bio,
+            followers_count: followersCount,
+            following_count: followingCount
+        };
+    } catch (err: any) {
+        // If it's the default URL and we hit a connection error, fallback to mock user silently
+        try {
+            handleSupabaseError(err);
+        } catch (e: any) {
+            if (isDefaultUrl && (e.isDefaultUrlError || e.message?.includes('Unable to connect'))) {
+                console.warn('Auth: Default project unreachable, using mock user');
+                return MOCK_USER;
+            }
+            throw e;
+        }
+        return MOCK_USER; // Should not reach here if handleSupabaseError throws
     }
-    
-    // Fetch profile data with a 5s timeout
-    const fetchProfile = async () => {
-        try {
-            const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000));
-            const { data, error } = await Promise.race([
-                supabase.from('profiles').select('*').eq('id', user.id).maybeSingle(),
-                timeout
-            ]) as any;
-            if (error) console.error('Error fetching profile:', error);
-            return data;
-        } catch (e) {
-            console.warn('Profile fetch timed out, using fallback');
-            return null;
-        }
-    };
-
-    const data = await fetchProfile();
-    
-    // Fetch real-time counts directly from follows table - wrap in try/catch to prevent blocking
-    const fetchCount = async (query: any) => {
-        try {
-            // Add a 5s timeout for count queries
-            const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 5000));
-            const { count, error } = await Promise.race([query, timeoutPromise]) as any;
-            if (error) return 0;
-            return count || 0;
-        } catch (e) {
-            console.warn('Count fetch timed out or failed:', e);
-            return 0;
-        }
-    };
-
-    const followersPromise = fetchCount(supabase
-        .from('follows')
-        .select('*', { count: 'exact', head: true })
-        .eq('following_id', user.id));
-
-    const followingPromise = fetchCount(supabase
-        .from('follows')
-        .select('*', { count: 'exact', head: true })
-        .eq('follower_id', user.id));
-    
-    const [followersCount, followingCount] = await Promise.all([followersPromise, followingPromise]);
-    
-    // Return merged data or fallback from auth metadata
-    return {
-        id: user.id,
-        username: data?.username || user.user_metadata?.full_name?.replace(/\s+/g, '_').toLowerCase() || user.email?.split('@')[0] || 'user',
-        avatar_url: data?.avatar_url || user.user_metadata?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.id}`,
-        full_name: data?.full_name || user.user_metadata?.full_name || user.email?.split('@')[0] || 'Anonymous',
-        bio: data?.bio,
-        followers_count: followersCount,
-        following_count: followingCount
-    };
   },
 
   updateCurrentUser: async (updates: Partial<CurrentUser>): Promise<CurrentUser> => {
@@ -219,6 +349,7 @@ export const api = {
 
   // --- Profiles ---
   getUserProfile: async (userId: string, existingUser?: any): Promise<Profile> => {
+    if (IS_MOCK_MODE) return MOCK_USER;
     let user = existingUser;
     if (!user) {
         const { data: { user: authUser } } = await supabase.auth.getUser();
@@ -226,7 +357,10 @@ export const api = {
     }
     
     const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
-    if (error) throw error;
+    if (error) {
+        if (IS_MOCK_MODE || (isDefaultUrl && error.message?.includes('Failed to fetch'))) return MOCK_USER;
+        throw error;
+    }
 
     // Fetch real-time counts from the source of truth - wrap in try/catch to prevent blocking
     const fetchCount = async (query: any) => {
@@ -272,6 +406,7 @@ export const api = {
 
   // --- Feed & Posts ---
   getFeed: async (): Promise<Post[]> => {
+    if (IS_MOCK_MODE) return MOCK_POSTS;
     const { data: { user } } = await supabase.auth.getUser();
 
     // Fetch posts with profiles and real-time counts from related tables
@@ -291,10 +426,19 @@ export const api = {
                 .order('created_at', { ascending: false }),
                 timeout
             ]) as any;
-            if (error) throw error;
+            if (error) {
+                handleSupabaseError(error);
+            }
             return data || [];
-        } catch (e) {
-            console.warn('Feed fetch timed out or failed:', e);
+        } catch (e: any) {
+            if (e instanceof Error && e.message === 'timeout') {
+                console.warn('Feed fetch timed out, using fallback');
+                return IS_MOCK_MODE ? MOCK_POSTS : [];
+            }
+            if (isDefaultUrl && (e.message?.includes('Unable to connect') || e.isDefaultUrlError)) {
+                return MOCK_POSTS;
+            }
+            handleSupabaseError(e);
             return [];
         }
     };
@@ -394,6 +538,9 @@ export const api = {
 
   // --- Comments ---
   getComments: async (postId: string): Promise<Comment[]> => {
+    if (IS_MOCK_MODE) return [
+        { id: 'c1', post_id: postId, user_id: 'other', content: 'This looks amazing!', created_at: new Date().toISOString(), profile: { username: 'fan_1', avatar_url: '' } }
+    ] as any;
     const { data } = await supabase.from('comments').select('*, profile:user_id(*)').eq('post_id', postId).order('created_at', { ascending: true });
     return data || [];
   },
@@ -427,6 +574,9 @@ export const api = {
 
   // --- Messaging ---
   getMessages: async (friendId: string): Promise<Message[]> => {
+      if (IS_MOCK_MODE) return [
+          { id: 'm1', sender_id: friendId, receiver_id: 'me', content: 'Hey! This is a demo message.', created_at: new Date().toISOString(), type: 'text' }
+      ] as any;
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return [];
 
@@ -498,13 +648,17 @@ export const api = {
 
   // --- Storage ---
   uploadFile: async (file: File): Promise<string> => {
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${fileExt}`;
-      const { error } = await supabase.storage.from('images').upload(fileName, file);
-      if (error) throw error;
-      
-      const { data } = supabase.storage.from('images').getPublicUrl(fileName);
-      return data.publicUrl;
+      try {
+          const fileExt = file.name.split('.').pop();
+          const fileName = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${fileExt}`;
+          const { error } = await supabase.storage.from('images').upload(fileName, file);
+          if (error) throw error;
+          
+          const { data } = supabase.storage.from('images').getPublicUrl(fileName);
+          return data.publicUrl;
+      } catch (err: any) {
+          handleSupabaseError(err);
+      }
   },
 
   // --- Notifications ---
@@ -513,21 +667,31 @@ export const api = {
       if (!user) return [];
       
       try {
-          const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000));
-          const { data } = await Promise.race([
+          const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 8000));
+          const { data, error } = await Promise.race([
               supabase.from('notifications')
                 .select('*, sender_profile:profiles!sender_id(*)')
                 .eq('user_id', user.id)
-                .order('created_at', { ascending: false }),
+                .order('created_at', { ascending: false })
+                .limit(50),
               timeout
           ]) as any;
+          
+          if (error) {
+              console.error('Error fetching notifications:', error);
+              handleSupabaseError(error);
+          }
           
           return (data || []).map((n: any) => ({
               ...n,
               sender_profile: Array.isArray(n.sender_profile) ? n.sender_profile[0] : n.sender_profile
           }));
-      } catch (e) {
-          console.warn('Notifications fetch timed out or failed:', e);
+      } catch (e: any) {
+          if (e instanceof Error && e.message === 'timeout') {
+              console.warn('Notifications fetch timed out');
+              return [];
+          }
+          console.error('getNotifications failed:', e);
           return [];
       }
   },

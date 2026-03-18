@@ -5,7 +5,7 @@ import { Notification } from '../../types';
 import { Avatar } from '../Core/Avatar';
 import { motion, AnimatePresence } from 'framer-motion';
 import { DS, theme, commonStyles } from '../../Theme';
-import { Bell, Heart, ChatCircle, UserPlus, CaretLeft } from '@phosphor-icons/react';
+import { Bell, Heart, ChatCircle, UserPlus, CaretLeft, ArrowsClockwise } from '@phosphor-icons/react';
 import { formatDistanceToNow } from 'date-fns';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
@@ -16,13 +16,19 @@ export const Activity: React.FC = () => {
   const { user } = useAuth();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [isLive, setIsLive] = useState(false);
 
-  const fetchNotifications = async () => {
+  const fetchNotifications = async (isManual = false) => {
+     if (isManual) setRefreshing(true);
      try {
          const data = await api.getNotifications();
          setNotifications(data);
      } catch (e) {
-         console.error("Failed to load notifications", e);
+         console.error("Activity: Failed to load notifications", e);
+     } finally {
+         if (isManual) setRefreshing(true);
+         setTimeout(() => setRefreshing(false), 600);
      }
   };
 
@@ -32,13 +38,13 @@ export const Activity: React.FC = () => {
 
     const load = async () => {
         try {
-            // 5s safety timeout
+            // 8s safety timeout
             activityTimeout = setTimeout(() => {
                 if (mounted) {
                     console.warn('Activity: Data loading timed out');
                     setLoading(false);
                 }
-            }, 5000);
+            }, 8000);
 
             await fetchNotifications();
             if (mounted) setLoading(false);
@@ -58,17 +64,26 @@ export const Activity: React.FC = () => {
         if (channel) {
             await supabase.removeChannel(channel);
         }
-        channel = supabase.channel(`notifications:${user.id}`)
+        
+        console.log("Activity: Subscribing to notifications for user", user.id);
+        
+        channel = supabase.channel(`activity_realtime_${user.id}`)
             .on(
                 'postgres_changes',
-                { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` },
+                { event: '*', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` },
                 async (payload) => {
-                    console.log("Activity: Real-time notification received", payload);
-                    if (mounted) await fetchNotifications(); // Refresh on new item
+                    console.log("Activity: Real-time event received", payload.eventType, payload);
+                    if (mounted) {
+                        // For INSERT, we definitely want to refresh
+                        // For UPDATE/DELETE, we also refresh to keep UI in sync
+                        await fetchNotifications();
+                    }
                 }
             )
             .subscribe(async (status, err) => {
                 console.log("Activity: Subscription status:", status, err);
+                if (mounted) setIsLive(status === 'SUBSCRIBED');
+                
                 if (status === 'CHANNEL_ERROR') {
                     console.error("Activity: Channel error:", err);
                     if (channel) await supabase.removeChannel(channel);
@@ -139,17 +154,53 @@ export const Activity: React.FC = () => {
                 background: `linear-gradient(to bottom, ${DS.Color.Base.Surface[1]} 80%, transparent 100%)`,
                 backdropFilter: 'blur(12px)',
                 WebkitBackdropFilter: 'blur(12px)',
-                display: 'flex', alignItems: 'center', gap: '16px'
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between'
             }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                    <button 
+                        onClick={() => navigate(-1)}
+                        style={{ background: 'none', border: 'none', color: theme.colors.text1, cursor: 'pointer', display: 'flex' }}
+                    >
+                        <CaretLeft size={24} />
+                    </button>
+                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                        <h1 style={{ ...DS.Type.Expressive.Display, fontSize: '32px', color: theme.colors.text1, margin: 0 }}>
+                            Activity<span style={{ color: theme.colors.accent }}>.</span>
+                        </h1>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <div style={{ 
+                                width: '6px', height: '6px', borderRadius: '50%', 
+                                background: isLive ? '#22c55e' : '#94a3b8',
+                                boxShadow: isLive ? '0 0 8px #22c55e' : 'none'
+                            }} />
+                            <span style={{ fontSize: '10px', fontWeight: 700, color: theme.colors.text3, letterSpacing: '0.05em' }}>
+                                {isLive ? 'LIVE' : 'CONNECTING...'}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+                
                 <button 
-                    onClick={() => navigate(-1)}
-                    style={{ background: 'none', border: 'none', color: theme.colors.text1, cursor: 'pointer', display: 'flex' }}
+                    onClick={() => fetchNotifications(true)}
+                    disabled={refreshing}
+                    style={{ 
+                        background: DS.Color.Base.Surface[2], 
+                        border: `1px solid ${DS.Color.Base.Border}`, 
+                        color: theme.colors.text1, 
+                        cursor: 'pointer', 
+                        width: '40px', height: '40px',
+                        borderRadius: '50%',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        transition: 'all 0.2s ease'
+                    }}
                 >
-                    <CaretLeft size={24} />
+                    <motion.div
+                        animate={{ rotate: refreshing ? 360 : 0 }}
+                        transition={{ duration: 0.5, repeat: refreshing ? Infinity : 0, ease: "linear" }}
+                    >
+                        <ArrowsClockwise size={20} />
+                    </motion.div>
                 </button>
-                <h1 style={{ ...DS.Type.Expressive.Display, fontSize: '32px', color: theme.colors.text1, margin: 0 }}>
-                    Activity<span style={{ color: theme.colors.accent }}>.</span>
-                </h1>
             </div>
 
             {/* List */}

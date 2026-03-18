@@ -104,6 +104,97 @@ const NotificationContainer = () => {
     )
 }
 
+const ConnectionErrorBanner = () => {
+    const { connectionError, refreshAuth } = useAuth();
+    const [retrying, setRetrying] = useState(false);
+    
+    const handleRetry = async () => {
+        setRetrying(true);
+        try {
+            await refreshAuth();
+        } finally {
+            setRetrying(false);
+        }
+    };
+
+    const handleTryDemo = () => {
+        localStorage.setItem('supabase_mock_mode', 'true');
+        window.location.reload();
+    };
+
+    const isDefaultUrlError = connectionError?.includes('default Supabase project');
+
+    return (
+        <AnimatePresence>
+            {connectionError && (
+                <motion.div 
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    style={{ 
+                        background: '#ef4444', 
+                        color: 'white', 
+                        padding: '12px 16px', 
+                        fontSize: '12px', 
+                        textAlign: 'center',
+                        fontWeight: 500,
+                        position: 'sticky',
+                        top: 0,
+                        zIndex: 10000,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '8px'
+                    }}
+                >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span role="img" aria-label="warning">⚠️</span>
+                        {connectionError}
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                        <button 
+                            onClick={handleRetry}
+                            disabled={retrying}
+                            style={{
+                                background: 'rgba(255,255,255,0.2)',
+                                border: '1px solid rgba(255,255,255,0.4)',
+                                color: 'white',
+                                padding: '4px 12px',
+                                borderRadius: '4px',
+                                fontSize: '10px',
+                                cursor: 'pointer',
+                                textTransform: 'uppercase',
+                                fontWeight: 700
+                            }}
+                        >
+                            {retrying ? 'Retrying...' : 'Retry'}
+                        </button>
+                        {isDefaultUrlError && (
+                            <button 
+                                onClick={handleTryDemo}
+                                style={{
+                                    background: 'white',
+                                    border: 'none',
+                                    color: '#ef4444',
+                                    padding: '4px 12px',
+                                    borderRadius: '4px',
+                                    fontSize: '10px',
+                                    cursor: 'pointer',
+                                    textTransform: 'uppercase',
+                                    fontWeight: 700
+                                }}
+                            >
+                                Try Demo Mode
+                            </button>
+                        )}
+                    </div>
+                </motion.div>
+            )}
+        </AnimatePresence>
+    );
+};
+
 const AppLayout: React.FC = () => {
   const { user } = useAuth();
   
@@ -118,6 +209,7 @@ const AppLayout: React.FC = () => {
       overflowX: 'hidden',
       transition: 'background-color 0.6s cubic-bezier(0.22, 1, 0.36, 1), color 0.6s cubic-bezier(0.22, 1, 0.36, 1)'
     }}>
+      <ConnectionErrorBanner />
       <NotificationContainer />
       <AnimatedRoutes />
       {/* Only show Nav if logged in and not on login page */}

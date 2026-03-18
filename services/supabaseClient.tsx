@@ -39,29 +39,16 @@ export const parseMessageContent = (msg: any): Message => {
 export const api = {
   sendNotification: async (userId: string, senderId: string, type: 'like' | 'comment' | 'follow', referenceId: string, mediaUrl?: string): Promise<void> => {
       try {
-          const payload = { 
-              user_id: userId, 
-              sender_id: senderId, 
-              type, 
-              reference_id: referenceId, 
-              media_url: mediaUrl 
-          };
-          console.log("Activity: Sending notification payload:", payload);
-          const response = await fetch('https://lezvekpflqbxornefbwh.supabase.co/functions/v1/send-notification', {
+          await fetch('https://lezvekpflqbxornefbwh.supabase.co/functions/v1/send-notification', {
               method: 'POST',
               headers: {
                   'Content-Type': 'application/json',
                   'Authorization': `Bearer ${SUPABASE_KEY}`
               },
-              body: JSON.stringify(payload)
+              body: JSON.stringify({ userId, senderId, type, referenceId, mediaUrl })
           });
-          const responseData = await response.json();
-          console.log("Activity: Edge Function response:", responseData);
-          if (!response.ok) {
-              console.error("Activity: Edge Function failed with status:", response.status, responseData);
-          }
       } catch (e) {
-          console.error("Activity: Failed to send notification via Edge Function", e);
+          console.error("Failed to send notification via Edge Function", e);
       }
   },
 
@@ -506,24 +493,11 @@ export const api = {
       if (!user) return [];
       
       try {
-          console.log("Activity: Querying notifications for user:", user.id);
           const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000));
-          
-          // Simplified query to isolate if the join is the issue
-          const { data, error } = await Promise.race([
-              supabase.from('notifications')
-                .select('*')
-                .eq('user_id', user.id)
-                .order('created_at', { ascending: false }),
+          const { data } = await Promise.race([
+              supabase.from('notifications').select('*, sender_profile:sender_id(*)').eq('user_id', user.id).order('created_at', { ascending: false }),
               timeout
           ]) as any;
-          
-          if (error) {
-              console.error("Activity: Error fetching notifications:", error);
-              throw error;
-          }
-          
-          console.log("Activity: Notifications raw data:", data);
           return data || [];
       } catch (e) {
           console.warn('Notifications fetch timed out or failed:', e);

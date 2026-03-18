@@ -39,16 +39,23 @@ export const parseMessageContent = (msg: any): Message => {
 export const api = {
   sendNotification: async (userId: string, senderId: string, type: 'like' | 'comment' | 'follow', referenceId: string, mediaUrl?: string): Promise<void> => {
       try {
-          await fetch('https://lezvekpflqbxornefbwh.supabase.co/functions/v1/send-notification', {
+          const payload = { userId, senderId, type, referenceId, mediaUrl };
+          console.log("Activity: Sending notification payload:", payload);
+          const response = await fetch('https://lezvekpflqbxornefbwh.supabase.co/functions/v1/send-notification', {
               method: 'POST',
               headers: {
                   'Content-Type': 'application/json',
                   'Authorization': `Bearer ${SUPABASE_KEY}`
               },
-              body: JSON.stringify({ userId, senderId, type, referenceId, mediaUrl })
+              body: JSON.stringify(payload)
           });
+          const responseData = await response.json();
+          console.log("Activity: Edge Function response:", responseData);
+          if (!response.ok) {
+              console.error("Activity: Edge Function failed with status:", response.status, responseData);
+          }
       } catch (e) {
-          console.error("Failed to send notification via Edge Function", e);
+          console.error("Activity: Failed to send notification via Edge Function", e);
       }
   },
 

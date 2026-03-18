@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Room, 
   RoomEvent, 
+  ParticipantEvent,
   RemoteParticipant, 
   RemoteTrack, 
   RemoteTrackPublication, 
@@ -22,11 +23,77 @@ import {
   VideoCamera, 
   VideoCameraSlash,
   User,
-  CaretLeft
+  CaretLeft,
+  Monitor
 } from '@phosphor-icons/react';
 import { theme, DS, commonStyles } from '../../Theme';
 import { useAuth } from '../../contexts/AuthContext';
 import { Loader } from '../Core/Loader';
+
+const RemoteVideo: React.FC<{ participant: RemoteParticipant }> = ({ participant }) => {
+  const videoRefs = useRef<Map<string, HTMLVideoElement>>(new Map());
+  const [videoTracks, setVideoTracks] = useState<RemoteTrackPublication[]>([]);
+
+  useEffect(() => {
+    const updateTracks = () => {
+      setVideoTracks(Array.from(participant.videoTracks.values()));
+    };
+
+    participant.on(ParticipantEvent.TrackSubscribed, (track) => {
+      if (track.kind === Track.Kind.Video) {
+        updateTracks();
+        const el = videoRefs.current.get(track.sid);
+        if (el) track.attach(el);
+      }
+    });
+
+    participant.on(ParticipantEvent.TrackUnsubscribed, (track) => {
+      if (track.kind === Track.Kind.Video) {
+        updateTracks();
+      }
+    });
+
+    updateTracks();
+
+    // Initial attach for existing tracks
+    participant.videoTracks.forEach(pub => {
+      if (pub.track && pub.track.kind === Track.Kind.Video) {
+        const el = videoRefs.current.get(pub.track.sid);
+        if (el) pub.track.attach(el);
+      }
+    });
+
+    return () => {
+      participant.removeAllListeners();
+    };
+  }, [participant]);
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: videoTracks.length > 1 ? '1fr 1fr' : '1fr', height: '100%', width: '100%', background: '#111' }}>
+      {videoTracks.map(pub => (
+        <div key={pub.trackSid} style={{ position: 'relative', height: '100%', width: '100%' }}>
+          <video 
+            ref={el => { if (el) videoRefs.current.set(pub.trackSid, el); }}
+            autoPlay
+            playsInline
+            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+          />
+          <div style={{ position: 'absolute', bottom: '20px', left: '20px', background: 'rgba(0,0,0,0.5)', padding: '4px 12px', borderRadius: '20px', color: '#fff', fontSize: '12px', backdropFilter: 'blur(10px)', zIndex: 10 }}>
+            {participant.identity} {pub.source === Track.Source.ScreenShare ? '(Screen)' : ''}
+          </div>
+        </div>
+      ))}
+      {videoTracks.length === 0 && (
+        <div style={{ ...commonStyles.flexCenter, height: '100%', flexDirection: 'column', gap: '16px', background: '#111' }}>
+          <div style={{ width: '60px', height: '60px', borderRadius: '50%', background: '#222', ...commonStyles.flexCenter }}>
+            <User size={30} color="#444" />
+          </div>
+          <p style={{ color: '#444', fontSize: '12px' }}>{participant.identity} (No Video)</p>
+        </div>
+      )}
+    </div>
+  );
+};
 
 export const DirectCall: React.FC = () => {
   const { user: currentUser } = useAuth();
@@ -37,9 +104,11 @@ export const DirectCall: React.FC = () => {
   const [remoteParticipants, setRemoteParticipants] = useState<RemoteParticipant[]>([]);
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const containerRef = useRef<HTMLDivElement>(null);
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRefs = useRef<Map<string, HTMLVideoElement>>(new Map());
 
@@ -92,6 +161,12 @@ export const DirectCall: React.FC = () => {
           track.detach();
         });
 
+        r.on(RoomEvent.LocalTrackPublished, (publication, participant) => {
+          if (publication.track?.kind === Track.Kind.Video && localVideoRef.current) {
+            publication.track.attach(localVideoRef.current);
+          }
+        });
+
         // 4. Connect
         await r.connect(wsUrl, token);
         setRoom(r);
@@ -99,10 +174,10 @@ export const DirectCall: React.FC = () => {
         // 5. Publish Local Tracks
         await r.localParticipant.enableCameraAndMicrophone();
         
-        // Attach local video
-        const localTrackPub = r.localParticipant.getTrackPublication(Track.Source.Camera);
-        if (localTrackPub?.videoTrack && localVideoRef.current) {
-          localTrackPub.videoTrack.attach(localVideoRef.current);
+        // Initial attachment if already published
+        const videoTrack = r.localParticipant.getTrackPublication(Track.Source.Camera)?.videoTrack;
+        if (videoTrack && localVideoRef.current) {
+          videoTrack.attach(localVideoRef.current);
         }
 
         setRemoteParticipants(Array.from(r.remoteParticipants.values()));
@@ -136,6 +211,17 @@ export const DirectCall: React.FC = () => {
     setIsVideoOff(off);
   };
 
+  const toggleScreenShare = async () => {
+    if (!room) return;
+    try {
+      const enabled = !isScreenSharing;
+      await room.localParticipant.setScreenShareEnabled(enabled);
+      setIsScreenSharing(enabled);
+    } catch (e) {
+      console.error('Screen share error:', e);
+    }
+  };
+
   const endCall = () => {
     room?.disconnect();
     navigate(-1);
@@ -153,24 +239,14 @@ export const DirectCall: React.FC = () => {
   }
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: '#000', zIndex: 9999, overflow: 'hidden' }}>
+    <div ref={containerRef} style={{ position: 'fixed', inset: 0, background: '#000', zIndex: 9999, overflow: 'hidden' }}>
       
       {/* Remote Video (Main View) */}
       <div style={{ width: '100%', height: '100%', position: 'relative' }}>
         {remoteParticipants.length > 0 ? (
           <div style={{ display: 'grid', gridTemplateColumns: remoteParticipants.length > 1 ? '1fr 1fr' : '1fr', height: '100%', width: '100%' }}>
             {remoteParticipants.map(p => (
-              <div key={p.sid} style={{ position: 'relative', background: '#111' }}>
-                <video 
-                  ref={el => { if (el) remoteVideoRefs.current.set(p.sid, el); }}
-                  autoPlay
-                  playsInline
-                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                />
-                <div style={{ position: 'absolute', bottom: '20px', left: '20px', background: 'rgba(0,0,0,0.5)', padding: '4px 12px', borderRadius: '20px', color: '#fff', fontSize: '12px', backdropFilter: 'blur(10px)' }}>
-                  {p.identity}
-                </div>
-              </div>
+              <RemoteVideo key={p.sid} participant={p} />
             ))}
           </div>
         ) : (
@@ -186,10 +262,12 @@ export const DirectCall: React.FC = () => {
       {/* Local Video (PIP) */}
       <motion.div 
         drag
-        dragConstraints={{ left: 20, right: window.innerWidth - 140, top: 20, bottom: window.innerHeight - 200 }}
+        dragConstraints={containerRef}
+        dragElastic={0.1}
+        dragMomentum={false}
         style={{ 
           position: 'absolute', 
-          top: '40px', 
+          bottom: '120px', 
           right: '20px', 
           width: '120px', 
           height: '180px', 
@@ -198,7 +276,8 @@ export const DirectCall: React.FC = () => {
           background: '#222',
           boxShadow: '0 10px 30px rgba(0,0,0,0.5)',
           border: '1px solid rgba(255,255,255,0.1)',
-          zIndex: 100
+          zIndex: 100,
+          touchAction: 'none'
         }}
       >
         <video 
@@ -262,6 +341,17 @@ export const DirectCall: React.FC = () => {
           }}
         >
           {isVideoOff ? <VideoCameraSlash size={20} weight="fill" /> : <VideoCamera size={20} weight="fill" />}
+        </button>
+
+        <button 
+          onClick={toggleScreenShare}
+          style={{ 
+            width: '48px', height: '48px', borderRadius: '50%', border: 'none', 
+            background: isScreenSharing ? DS.Color.Accent.Surface : 'rgba(255,255,255,0.1)',
+            color: '#fff', cursor: 'pointer', ...commonStyles.flexCenter, transition: 'all 0.2s'
+          }}
+        >
+          <Monitor size={20} weight={isScreenSharing ? "fill" : "regular"} />
         </button>
       </div>
 

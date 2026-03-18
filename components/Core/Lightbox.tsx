@@ -9,9 +9,10 @@ interface LightboxProps {
   src: string;
   onClose: () => void;
   type?: 'image' | 'video';
+  layoutId?: string;
 }
 
-export const Lightbox: React.FC<LightboxProps> = ({ isOpen, src, onClose, type = 'image' }) => {
+export const Lightbox: React.FC<LightboxProps> = ({ isOpen, src, onClose, type = 'image', layoutId }) => {
   return (
     <AnimatePresence>
       {isOpen && (
@@ -55,20 +56,27 @@ export const Lightbox: React.FC<LightboxProps> = ({ isOpen, src, onClose, type =
             <X size={24} weight="bold" />
           </button>
 
-          <motion.div
-            initial={{ scale: 0.9, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.9, opacity: 0 }}
-            transition={DS.Motion.Spring.Gentle}
+          <div
             style={{ position: 'relative', maxWidth: '100%', maxHeight: '100%' }}
             onClick={(e) => e.stopPropagation()}
           >
             {type === 'video' ? (
-               <video src={src} controls autoPlay style={{ maxWidth: '100%', maxHeight: '90vh', borderRadius: DS.Radius.M }} />
+               <motion.video 
+                 layoutId={layoutId}
+                 src={src} 
+                 controls 
+                 autoPlay 
+                 style={{ maxWidth: '100%', maxHeight: '90vh', borderRadius: DS.Radius.M }} 
+               />
             ) : (
-               <img src={src} alt="Full view" style={{ maxWidth: '100%', maxHeight: '90vh', objectFit: 'contain', borderRadius: DS.Radius.M }} />
+               <motion.img 
+                 layoutId={layoutId}
+                 src={src} 
+                 alt="Full view" 
+                 style={{ maxWidth: '100%', maxHeight: '90vh', objectFit: 'contain', borderRadius: DS.Radius.M }} 
+               />
             )}
-          </motion.div>
+          </div>
         </motion.div>
       )}
     </AnimatePresence>

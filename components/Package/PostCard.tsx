@@ -143,7 +143,12 @@ export const PostCard: React.FC<PostCardProps> = ({ post, currentUser }) => {
 
   return (
     <>
-      <Lightbox isOpen={lightboxOpen} src={post.image_url} onClose={() => setLightboxOpen(false)} />
+      <Lightbox 
+        isOpen={lightboxOpen} 
+        src={post.image_url} 
+        onClose={() => setLightboxOpen(false)} 
+        layoutId={`post-media-${post.id}`}
+      />
       
       <motion.article 
         initial={{ opacity: 0, y: 50 }}
@@ -153,7 +158,7 @@ export const PostCard: React.FC<PostCardProps> = ({ post, currentUser }) => {
         style={{ width: '100%', position: 'relative', marginBottom: '64px' }}
       >
         {/* Media Component - COVER Sizing Mode */}
-        <motion.div 
+        <div 
           style={{
             position: 'relative',
             width: '100%',
@@ -169,11 +174,10 @@ export const PostCard: React.FC<PostCardProps> = ({ post, currentUser }) => {
           }}
           onClick={handleImageClick}
           onDoubleClick={handleDoubleTap}
-          whileHover={{ scale: 1.005 }}
-          transition={DS.Motion.Spring.Gentle}
         >
           {!imageError ? (
-            <img 
+            <motion.img 
+              layoutId={`post-media-${post.id}`}
               src={post.image_url} 
               alt="Moment" 
               style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
@@ -204,7 +208,7 @@ export const PostCard: React.FC<PostCardProps> = ({ post, currentUser }) => {
               </motion.div>
             )}
           </AnimatePresence>
-        </motion.div>
+        </div>
         
         {/* Metadata Section */}
         <div style={{ padding: '0 4px' }}>

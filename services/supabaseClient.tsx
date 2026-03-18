@@ -37,6 +37,21 @@ export const parseMessageContent = (msg: any): Message => {
 // --- API Implementation ---
 
 export const api = {
+  sendNotification: async (userId: string, senderId: string, type: 'like' | 'comment' | 'follow', referenceId: string, mediaUrl?: string): Promise<void> => {
+      try {
+          await fetch('https://lezvekpflqbxornefbwh.supabase.co/functions/v1/send-notification', {
+              method: 'POST',
+              headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${SUPABASE_KEY}`
+              },
+              body: JSON.stringify({ userId, senderId, type, referenceId, mediaUrl })
+          });
+      } catch (e) {
+          console.error("Failed to send notification via Edge Function", e);
+      }
+  },
+
   // --- Auth ---
   signUpWithEmail: async (email: string, pass: string, fullName: string): Promise<void> => {
     const { error } = await supabase.auth.signUp({
@@ -350,6 +365,10 @@ export const api = {
         await supabase.from('likes').delete().eq('id', data.id);
     } else {
         await supabase.from('likes').insert({ user_id: userId, post_id: postId });
+        // Trigger notification if not self-like
+        if (userId !== ownerId) {
+            await api.sendNotification(ownerId, userId, 'like', postId);
+        }
     }
   },
 
@@ -359,9 +378,15 @@ export const api = {
     return data || [];
   },
 
-  addComment: async (postId: string, userId: string, content: string): Promise<Comment> => {
+  addComment: async (postId: string, userId: string, content: string, ownerId: string): Promise<Comment> => {
     const { data, error } = await supabase.from('comments').insert({ post_id: postId, user_id: userId, content }).select('*, profile:user_id(*)').single();
     if (error) throw error;
+    
+    // Trigger notification if not self-comment
+    if (userId !== ownerId) {
+        await api.sendNotification(ownerId, userId, 'comment', postId);
+    }
+    
     return data;
   },
 
@@ -372,6 +397,8 @@ export const api = {
   // --- Interactions ---
   followUser: async (followerId: string, targetId: string): Promise<void> => {
       await supabase.from('follows').insert({ follower_id: followerId, following_id: targetId });
+      // Trigger notification
+      await api.sendNotification(targetId, followerId, 'follow', targetId);
   },
 
   unfollowUser: async (followerId: string, targetId: string): Promise<void> => {

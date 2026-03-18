@@ -89,7 +89,7 @@ export const PostCard: React.FC<PostCardProps> = ({ post, currentUser }) => {
     const text = newComment;
     setNewComment('');
     try {
-      const savedComment = await api.addComment(post.id, currentUser.id, text);
+      const savedComment = await api.addComment(post.id, currentUser.id, text, post.user_id);
       setComments(prev => [...prev, savedComment]);
     } catch (e) {
       console.error("Failed to comment", e);

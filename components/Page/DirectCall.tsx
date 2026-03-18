@@ -24,7 +24,8 @@ import {
   VideoCameraSlash,
   User,
   CaretLeft,
-  Monitor
+  Monitor,
+  CaretUp
 } from '@phosphor-icons/react';
 import { theme, DS, commonStyles } from '../../Theme';
 import { useAuth } from '../../contexts/AuthContext';
@@ -105,6 +106,7 @@ export const DirectCall: React.FC = () => {
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [isMediaMenuOpen, setIsMediaMenuOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -332,27 +334,66 @@ export const DirectCall: React.FC = () => {
           <PhoneDisconnect size={28} weight="fill" />
         </button>
 
-        <button 
-          onClick={toggleVideo}
-          style={{ 
-            width: '48px', height: '48px', borderRadius: '50%', border: 'none', 
-            background: isVideoOff ? DS.Color.Status.Error : 'rgba(255,255,255,0.1)',
-            color: '#fff', cursor: 'pointer', ...commonStyles.flexCenter, transition: 'all 0.2s'
-          }}
-        >
-          {isVideoOff ? <VideoCameraSlash size={20} weight="fill" /> : <VideoCamera size={20} weight="fill" />}
-        </button>
+        <div style={{ position: 'relative' }}>
+          <AnimatePresence>
+            {isMediaMenuOpen && (
+              <motion.div
+                initial={{ opacity: 0, y: 10, scale: 0.9 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 10, scale: 0.9 }}
+                style={{
+                  position: 'absolute',
+                  bottom: '70px',
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '12px',
+                  background: 'rgba(255,255,255,0.1)',
+                  padding: '12px',
+                  borderRadius: '24px',
+                  backdropFilter: 'blur(20px)',
+                  border: '1px solid rgba(255,255,255,0.1)',
+                }}
+              >
+                <button 
+                  onClick={() => { toggleVideo(); setIsMediaMenuOpen(false); }}
+                  style={{ 
+                    width: '48px', height: '48px', borderRadius: '50%', border: 'none', 
+                    background: isVideoOff ? DS.Color.Status.Error : 'rgba(255,255,255,0.1)',
+                    color: '#fff', cursor: 'pointer', ...commonStyles.flexCenter, transition: 'all 0.2s'
+                  }}
+                >
+                  {isVideoOff ? <VideoCameraSlash size={20} weight="fill" /> : <VideoCamera size={20} weight="fill" />}
+                </button>
 
-        <button 
-          onClick={toggleScreenShare}
-          style={{ 
-            width: '48px', height: '48px', borderRadius: '50%', border: 'none', 
-            background: isScreenSharing ? DS.Color.Accent.Surface : 'rgba(255,255,255,0.1)',
-            color: '#fff', cursor: 'pointer', ...commonStyles.flexCenter, transition: 'all 0.2s'
-          }}
-        >
-          <Monitor size={20} weight={isScreenSharing ? "fill" : "regular"} />
-        </button>
+                <button 
+                  onClick={() => { toggleScreenShare(); setIsMediaMenuOpen(false); }}
+                  style={{ 
+                    width: '48px', height: '48px', borderRadius: '50%', border: 'none', 
+                    background: isScreenSharing ? DS.Color.Accent.Surface : 'rgba(255,255,255,0.1)',
+                    color: '#fff', cursor: 'pointer', ...commonStyles.flexCenter, transition: 'all 0.2s'
+                  }}
+                >
+                  <Monitor size={20} weight={isScreenSharing ? "fill" : "regular"} />
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          <button 
+            onClick={() => setIsMediaMenuOpen(!isMediaMenuOpen)}
+            style={{ 
+              width: '48px', height: '48px', borderRadius: '50%', border: 'none', 
+              background: isMediaMenuOpen ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.1)',
+              color: '#fff', cursor: 'pointer', ...commonStyles.flexCenter, transition: 'all 0.2s'
+            }}
+          >
+            <motion.div animate={{ rotate: isMediaMenuOpen ? 180 : 0 }}>
+              <CaretUp size={20} weight="bold" />
+            </motion.div>
+          </button>
+        </div>
       </div>
 
       {/* Back Button */}

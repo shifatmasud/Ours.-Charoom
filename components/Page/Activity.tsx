@@ -230,7 +230,7 @@ const NotificationItem: React.FC<NotificationItemProps> = ({ notification, index
              {/* Avatar with Badge */}
              <div style={{ position: 'relative', flexShrink: 0 }}>
                 <Link to={`/profile/${notification.sender_profile?.id}`} onClick={(e) => e.stopPropagation()}>
-                    <Avatar src={notification.sender_profile?.avatar_url || ''} alt="user" size="md" />
+                    <Avatar src={notification.sender_profile?.avatar_url || ''} alt={notification.sender_profile?.username || 'user'} size="md" />
                 </Link>
                 <div style={{
                     position: 'absolute', bottom: -4, right: -4,
@@ -253,7 +253,7 @@ const NotificationItem: React.FC<NotificationItemProps> = ({ notification, index
              {/* Text Content */}
              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '2px' }}>
                  <p style={{ fontSize: '14px', lineHeight: '1.4', color: theme.colors.text1, margin: 0 }}>
-                     <span style={{ fontWeight: 600 }}>{notification.sender_profile?.username || 'Someone'}</span>
+                     <span style={{ fontWeight: 600 }}>{notification.sender_profile?.username}</span>
                      <span style={{ color: theme.colors.text2, marginLeft: '4px' }}>
                          {notification.type === 'like' && 'liked your moment.'}
                          {notification.type === 'comment' && 'commented on your moment.'}

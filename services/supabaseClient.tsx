@@ -6,7 +6,21 @@ import { Post, Message, Notification, Profile, CurrentUser, Comment } from '../t
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://lezvekpflqbxornefbwh.supabase.co';
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxlenZla3BmbHFieG9ybmVmYndoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM3MDM1OTEsImV4cCI6MjA3OTI3OTU5MX0._fN9MxAivt_GyYv81lR7VJUShAPnYQ5txynHxwyrftw';
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+    // Disable WebLocks to prevent "Lock broken by another request with the 'steal' option"
+    // which occurs when multiple tabs or iframes compete for the same storage lock.
+    // We provide a robust no-op lock function that handles different argument patterns.
+    lock: async (...args: any[]) => {
+      const callback = args.find(a => typeof a === 'function');
+      if (callback) return await callback();
+      return null;
+    },
+  }
+});
 
 // --- Schema Adapters ---
 
@@ -39,29 +53,16 @@ export const parseMessageContent = (msg: any): Message => {
 export const api = {
   sendNotification: async (userId: string, senderId: string, type: 'like' | 'comment' | 'follow', referenceId: string, mediaUrl?: string): Promise<void> => {
       try {
-          const payload = { 
-              user_id: userId, 
-              sender_id: senderId, 
-              type, 
-              reference_id: referenceId, 
-              media_url: mediaUrl 
-          };
-          console.log("Activity: Sending notification payload:", payload);
-          const response = await fetch('https://lezvekpflqbxornefbwh.supabase.co/functions/v1/send-notification', {
+          await fetch('https://lezvekpflqbxornefbwh.supabase.co/functions/v1/send-notification', {
               method: 'POST',
               headers: {
                   'Content-Type': 'application/json',
                   'Authorization': `Bearer ${SUPABASE_KEY}`
               },
-              body: JSON.stringify(payload)
+              body: JSON.stringify({ userId, senderId, type, referenceId, mediaUrl })
           });
-          const responseData = await response.json();
-          console.log("Activity: Edge Function response:", responseData);
-          if (!response.ok) {
-              console.error("Activity: Edge Function failed with status:", response.status, responseData);
-          }
       } catch (e) {
-          console.error("Activity: Failed to send notification via Edge Function", e);
+          console.error("Failed to send notification via Edge Function", e);
       }
   },
 
@@ -502,26 +503,23 @@ export const api = {
 
   // --- Notifications ---
   getNotifications: async (): Promise<Notification[]> => {
-      // No longer filtering by user_id to make notifications public
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return [];
       
       try {
-          console.log("Activity: Querying all notifications...");
           const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000));
-          
-          const { data, error } = await Promise.race([
+          const { data } = await Promise.race([
               supabase.from('notifications')
-                .select('*')
+                .select('*, sender_profile:profiles!sender_id(*)')
+                .eq('user_id', user.id)
                 .order('created_at', { ascending: false }),
               timeout
           ]) as any;
           
-          if (error) {
-              console.error("Activity: Error fetching notifications:", error);
-              throw error;
-          }
-          
-          console.log("Activity: Notifications raw data:", data);
-          return data || [];
+          return (data || []).map((n: any) => ({
+              ...n,
+              sender_profile: Array.isArray(n.sender_profile) ? n.sender_profile[0] : n.sender_profile
+          }));
       } catch (e) {
           console.warn('Notifications fetch timed out or failed:', e);
           return [];

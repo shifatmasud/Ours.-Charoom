@@ -1,6 +1,5 @@
 
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Heart, ChatCircle, PaperPlaneTilt, PaperPlaneRight, WarningCircle, Check, Trash } from '@phosphor-icons/react';
 import { Avatar } from '../Core/Avatar';
@@ -13,18 +12,15 @@ import { Link } from 'react-router-dom';
 import { DS } from '../../Theme';
 import { formatDistanceToNow } from 'date-fns';
 import { Lightbox } from '../Core/Lightbox';
-import { ConfirmDialog } from '../Core/ConfirmDialog';
-import { Toast } from '../Core/Toast';
 
 interface PostCardProps {
   post: Post;
-  currentUser?: CurrentUser;
+  currentUser: CurrentUser;
 }
 
 const LIKE_COLOR = '#FF4F1F'; // Reddish Orange (Accent)
 
 export const PostCard: React.FC<PostCardProps> = ({ post, currentUser }) => {
-  const navigate = useNavigate();
   const [isLiked, setIsLiked] = useState(post.has_liked);
   const [likesCount, setLikesCount] = useState(post.likes_count || 0);
   const [showHeartOverlay, setShowHeartOverlay] = useState(false);
@@ -37,9 +33,6 @@ export const PostCard: React.FC<PostCardProps> = ({ post, currentUser }) => {
   const [isShared, setIsShared] = useState(false);
   const [isDeleted, setIsDeleted] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
-  const [confirmDeletePost, setConfirmDeletePost] = useState(false);
-  const [confirmDeleteComment, setConfirmDeleteComment] = useState<string | null>(null);
-  const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' | 'info' } | null>(null);
 
   const canDelete = currentUser?.is_admin || currentUser?.id === post.user_id;
 
@@ -65,10 +58,6 @@ export const PostCard: React.FC<PostCardProps> = ({ post, currentUser }) => {
   };
 
   const toggleLike = async () => {
-    if (!currentUser) {
-        navigate('/login');
-        return;
-    }
     const newLikedState = !isLiked;
     setIsLiked(newLikedState);
     setLikesCount(prev => newLikedState ? prev + 1 : prev - 1);
@@ -96,10 +85,6 @@ export const PostCard: React.FC<PostCardProps> = ({ post, currentUser }) => {
   };
 
   const handleAddComment = async () => {
-    if (!currentUser) {
-        navigate('/login');
-        return;
-    }
     if (!newComment.trim()) return;
     const text = newComment;
     setNewComment('');
@@ -133,26 +118,26 @@ export const PostCard: React.FC<PostCardProps> = ({ post, currentUser }) => {
   };
 
   const handleDeletePost = async () => {
-    setConfirmDeletePost(false);
+    if (!window.confirm("Delete this post?")) return;
     try {
         await api.deletePost(post.id);
         setIsDeleted(true);
-        setToast({ message: "Post deleted", type: 'success' });
     } catch (e) {
         console.error("Failed to delete post", e);
-        setToast({ message: "Failed to delete post", type: 'error' });
+        alert("Failed to delete post. Please try again.");
     }
   };
 
+  // Force re-save
+
   const handleDeleteComment = async (commentId: string) => {
-    setConfirmDeleteComment(null);
+    if (!window.confirm("Delete this comment?")) return;
     try {
         await api.deleteComment(commentId);
         setComments(prev => prev.filter(c => c.id !== commentId));
-        setToast({ message: "Comment deleted", type: 'success' });
     } catch (e) {
         console.error("Failed to delete comment", e);
-        setToast({ message: "Failed to delete comment", type: 'error' });
+        alert("Failed to delete comment.");
     }
   };
 
@@ -283,7 +268,7 @@ export const PostCard: React.FC<PostCardProps> = ({ post, currentUser }) => {
              {/* Right Group: Delete */}
              <div style={{ display: 'flex', gap: '8px' }}>
                   {canDelete && (
-                       <Button variant="ghost" size="icon" onClick={() => setConfirmDeletePost(true)} style={{ color: DS.Color.Status.Error }}>
+                       <Button variant="ghost" size="icon" onClick={handleDeletePost} style={{ color: DS.Color.Status.Error }}>
                            <Trash size={20} />
                        </Button>
                   )}
@@ -311,7 +296,7 @@ export const PostCard: React.FC<PostCardProps> = ({ post, currentUser }) => {
                           </div>
                           {(currentUser?.is_admin || currentUser?.id === comment.user_id) && (
                               <button 
-                                  onClick={() => setConfirmDeleteComment(comment.id)}
+                                  onClick={() => handleDeleteComment(comment.id)}
                                   style={{ background: 'none', border: 'none', cursor: 'pointer', color: DS.Color.Base.Content[3], padding: '0 4px' }}
                               >
                                   <Trash size={14} />
@@ -343,36 +328,6 @@ export const PostCard: React.FC<PostCardProps> = ({ post, currentUser }) => {
           </AnimatePresence>
         </div>
       </motion.article>
-
-      <ConfirmDialog 
-        isOpen={confirmDeletePost}
-        title="Delete Post"
-        message="Are you sure you want to delete this moment? This action cannot be undone."
-        confirmLabel="Delete"
-        variant="danger"
-        onConfirm={handleDeletePost}
-        onCancel={() => setConfirmDeletePost(false)}
-      />
-
-      <ConfirmDialog 
-        isOpen={!!confirmDeleteComment}
-        title="Delete Comment"
-        message="Remove this comment?"
-        confirmLabel="Delete"
-        variant="danger"
-        onConfirm={() => confirmDeleteComment && handleDeleteComment(confirmDeleteComment)}
-        onCancel={() => setConfirmDeleteComment(null)}
-      />
-
-      <AnimatePresence>
-        {toast && (
-          <Toast 
-            message={toast.message} 
-            type={toast.type} 
-            onClose={() => setToast(null)} 
-          />
-        )}
-      </AnimatePresence>
     </>
   );
 };

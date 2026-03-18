@@ -36,8 +36,13 @@ const RemoteVideo: React.FC<{ participant: RemoteParticipant }> = ({ participant
   const [videoTracks, setVideoTracks] = useState<RemoteTrackPublication[]>([]);
 
   useEffect(() => {
+    if (!participant) return;
     const updateTracks = () => {
-      setVideoTracks(Array.from(participant.videoTracks.values()));
+      if (participant?.videoTracks) {
+        setVideoTracks(Array.from(participant.videoTracks.values()));
+      } else {
+        setVideoTracks([]);
+      }
     };
 
     participant.on(ParticipantEvent.TrackSubscribed, (track) => {
@@ -57,7 +62,7 @@ const RemoteVideo: React.FC<{ participant: RemoteParticipant }> = ({ participant
     updateTracks();
 
     // Initial attach for existing tracks
-    participant.videoTracks.forEach(pub => {
+    participant.videoTracks?.forEach(pub => {
       if (pub.track && pub.track.kind === Track.Kind.Video) {
         const el = videoRefs.current.get(pub.track.sid);
         if (el) pub.track.attach(el);
@@ -101,6 +106,7 @@ export const DirectCall: React.FC = () => {
   const { roomId } = useParams<{ roomId: string }>();
   const navigate = useNavigate();
   
+  const roomRef = useRef<Room | null>(null);
   const [room, setRoom] = useState<Room | null>(null);
   const [remoteParticipants, setRemoteParticipants] = useState<RemoteParticipant[]>([]);
   const [isMuted, setIsMuted] = useState(false);
@@ -118,30 +124,51 @@ export const DirectCall: React.FC = () => {
     if (!roomId || !currentUser) return;
 
     const connectToRoom = async () => {
+      let localVideoTrack: LocalVideoTrack | null = null;
+      let localAudioTrack: LocalAudioTrack | null = null;
+
       try {
         setLoading(true);
         setError(null);
 
-        // 1. Get token from our server
+        // 1. Create local tracks first (better UX + avoids engine race conditions)
+        try {
+          localVideoTrack = await createLocalVideoTrack();
+          localAudioTrack = await createLocalAudioTrack();
+          
+          if (localVideoRef.current && localVideoTrack) {
+            localVideoTrack.attach(localVideoRef.current);
+          }
+        } catch (trackError) {
+          console.warn('Could not acquire media devices:', trackError);
+          // We continue even if tracks fail, as user might want to join as listener
+        }
+
+        // 2. Get token from our server
         const response = await fetch(`/api/get-livekit-token?room=${roomId}&identity=${currentUser.username || currentUser.id}`);
         const data = await response.json();
         
         if (data.error) throw new Error(data.error);
         const { token, serverUrl } = data;
 
-        // 2. Initialize Room
+        // 3. Initialize Room
         const wsUrl = import.meta.env.VITE_LIVEKIT_URL || serverUrl;
         
         if (!wsUrl) {
-          throw new Error('LiveKit URL is not configured. Please set LIVEKIT_URL in your server environment.');
+          throw new Error('LiveKit URL is not configured.');
         }
 
         const r = new Room({
           adaptiveStream: true,
           dynacast: true,
+          publishDefaults: {
+            simulcast: true,
+          }
         });
 
-        // 3. Setup Event Listeners
+        roomRef.current = r;
+
+        // 4. Setup Event Listeners
         r.on(RoomEvent.ParticipantConnected, (p) => {
           setRemoteParticipants(prev => [...prev, p]);
         });
@@ -150,37 +177,26 @@ export const DirectCall: React.FC = () => {
           setRemoteParticipants(prev => prev.filter(part => part.sid !== p.sid));
         });
 
-        r.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
-          if (track.kind === Track.Kind.Video) {
-            const el = remoteVideoRefs.current.get(participant.sid);
-            if (el) track.attach(el);
-          } else if (track.kind === Track.Kind.Audio) {
+        r.on(RoomEvent.TrackSubscribed, (track) => {
+          if (track.kind === Track.Kind.Audio) {
             track.attach();
           }
         });
 
-        r.on(RoomEvent.TrackUnsubscribed, (track, publication, participant) => {
-          track.detach();
-        });
-
-        r.on(RoomEvent.LocalTrackPublished, (publication, participant) => {
-          if (publication.track?.kind === Track.Kind.Video && localVideoRef.current) {
-            publication.track.attach(localVideoRef.current);
-          }
-        });
-
-        // 4. Connect
+        // 5. Connect
         await r.connect(wsUrl, token);
         setRoom(r);
 
-        // 5. Publish Local Tracks
-        await r.localParticipant.enableCameraAndMicrophone();
-        
-        // Initial attachment if already published
-        const videoTrack = r.localParticipant.getTrackPublication(Track.Source.Camera)?.videoTrack;
-        if (videoTrack && localVideoRef.current) {
-          videoTrack.attach(localVideoRef.current);
-        }
+        // 6. Publish Local Tracks with a small delay to ensure engine is ready
+        // This specifically avoids "publishing rejected as engine not connected within timeout"
+        setTimeout(async () => {
+          try {
+            if (localVideoTrack) await r.localParticipant.publishTrack(localVideoTrack);
+            if (localAudioTrack) await r.localParticipant.publishTrack(localAudioTrack);
+          } catch (pubError) {
+            console.error('Failed to publish tracks:', pubError);
+          }
+        }, 500);
 
         setRemoteParticipants(Array.from(r.remoteParticipants.values()));
         setLoading(false);
@@ -189,13 +205,18 @@ export const DirectCall: React.FC = () => {
         console.error('LiveKit connection error:', e);
         setError((e as Error).message);
         setLoading(false);
+        
+        // Cleanup on error
+        localVideoTrack?.stop();
+        localAudioTrack?.stop();
       }
     };
 
     connectToRoom();
 
     return () => {
-      room?.disconnect();
+      roomRef.current?.disconnect();
+      roomRef.current = null;
     };
   }, [roomId, currentUser]);
 
@@ -234,8 +255,21 @@ export const DirectCall: React.FC = () => {
   if (error) {
     return (
       <div style={{ ...commonStyles.flexCenter, height: '100vh', background: '#000', color: '#fff', flexDirection: 'column', gap: '20px', padding: '40px', textAlign: 'center' }}>
-        <p style={{ color: DS.Color.Status.Error, maxWidth: '400px' }}>{error}</p>
-        <button onClick={() => navigate(-1)} style={{ padding: '12px 24px', background: DS.Color.Base.Surface[2], border: 'none', borderRadius: '12px', color: '#fff', cursor: 'pointer' }}>Go Back</button>
+        <p style={{ color: DS.Color.Status.Error, maxWidth: '400px', fontSize: '14px' }}>{error}</p>
+        <div style={{ display: 'flex', gap: '12px' }}>
+          <button 
+            onClick={() => window.location.reload()} 
+            style={{ padding: '12px 24px', background: DS.Color.Accent.Surface, border: 'none', borderRadius: '12px', color: '#fff', cursor: 'pointer', fontWeight: 600 }}
+          >
+            Retry Connection
+          </button>
+          <button 
+            onClick={() => navigate(-1)} 
+            style={{ padding: '12px 24px', background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: '12px', color: '#fff', cursor: 'pointer' }}
+          >
+            Go Back
+          </button>
+        </div>
       </div>
     );
   }
@@ -252,11 +286,14 @@ export const DirectCall: React.FC = () => {
             ))}
           </div>
         ) : (
-          <div style={{ ...commonStyles.flexCenter, height: '100%', flexDirection: 'column', gap: '16px' }}>
-            <div style={{ width: '80px', height: '80px', borderRadius: '50%', background: '#222', ...commonStyles.flexCenter }}>
-              <User size={40} color="#444" />
+          <div style={{ ...commonStyles.flexCenter, height: '100%', flexDirection: 'column', gap: '24px', background: '#000' }}>
+            <div style={{ width: '100px', height: '100px', borderRadius: '50%', background: '#111', ...commonStyles.flexCenter, border: '1px solid rgba(255,255,255,0.05)' }}>
+              <User size={48} color="#333" />
             </div>
-            <p style={{ color: '#666', fontSize: '14px' }}>Waiting for others to join...</p>
+            <div style={{ textAlign: 'center' }}>
+              <p style={{ color: '#fff', fontSize: '18px', fontWeight: 600, marginBottom: '8px' }}>Waiting for others...</p>
+              <p style={{ color: '#666', fontSize: '14px' }}>The call will start as soon as they join</p>
+            </div>
           </div>
         )}
       </div>
@@ -305,10 +342,10 @@ export const DirectCall: React.FC = () => {
         display: 'flex', 
         gap: '20px', 
         alignItems: 'center',
-        background: 'rgba(255,255,255,0.1)',
+        background: 'rgba(255,255,255,0.08)',
         padding: '12px 24px',
         borderRadius: '40px',
-        backdropFilter: 'blur(20px)',
+        backdropFilter: DS.Effect.Blur.Frosted,
         border: '1px solid rgba(255,255,255,0.1)',
         zIndex: 100
       }}>
@@ -349,10 +386,10 @@ export const DirectCall: React.FC = () => {
                   display: 'flex',
                   flexDirection: 'column',
                   gap: '12px',
-                  background: 'rgba(255,255,255,0.1)',
+                  background: 'rgba(255,255,255,0.08)',
                   padding: '12px',
                   borderRadius: '24px',
-                  backdropFilter: 'blur(20px)',
+                  backdropFilter: DS.Effect.Blur.Frosted,
                   border: '1px solid rgba(255,255,255,0.1)',
                 }}
               >
@@ -401,9 +438,9 @@ export const DirectCall: React.FC = () => {
         onClick={() => navigate(-1)}
         style={{ 
           position: 'absolute', top: '40px', left: '20px', 
-          background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: '12px', 
+          background: 'rgba(255,255,255,0.08)', border: 'none', borderRadius: '12px', 
           padding: '8px 16px', color: '#fff', cursor: 'pointer',
-          display: 'flex', alignItems: 'center', gap: '8px', backdropFilter: 'blur(10px)',
+          display: 'flex', alignItems: 'center', gap: '8px', backdropFilter: DS.Effect.Blur.Frosted,
           zIndex: 100
         }}
       >

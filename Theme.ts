@@ -99,6 +99,7 @@ export const DS = {
     },
     Blur: {
       Glass: 'blur(16px)',
+      Frosted: 'blur(25px)',
     }
   },
   Motion: {

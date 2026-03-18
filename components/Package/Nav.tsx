@@ -27,8 +27,8 @@ export const Nav: React.FC = () => {
         transition={DS.Motion.Spring.Gentle}
         style={{
           background: DS.Color.Base.Glass,
-          backdropFilter: DS.Effect.Blur.Glass,
-          WebkitBackdropFilter: DS.Effect.Blur.Glass,
+          backdropFilter: DS.Effect.Blur.Frosted,
+          WebkitBackdropFilter: DS.Effect.Blur.Frosted,
           borderRadius: DS.Radius.Full,
           padding: '4px',
           display: 'flex',

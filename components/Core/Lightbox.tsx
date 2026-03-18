@@ -25,8 +25,8 @@ export const Lightbox: React.FC<LightboxProps> = ({ isOpen, src, onClose, type =
             position: 'fixed',
             inset: 0,
             zIndex: 9999,
-            backgroundColor: 'rgba(0, 0, 0, 0.95)',
-            backdropFilter: 'blur(10px)',
+            backgroundColor: 'rgba(0, 0, 0, 0.7)',
+            backdropFilter: DS.Effect.Blur.Frosted,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -50,7 +50,8 @@ export const Lightbox: React.FC<LightboxProps> = ({ isOpen, src, onClose, type =
               justifyContent: 'center',
               color: 'white',
               cursor: 'pointer',
-              zIndex: 10000
+              zIndex: 10000,
+              backdropFilter: 'blur(10px)'
             }}
           >
             <X size={24} weight="bold" />
@@ -66,6 +67,7 @@ export const Lightbox: React.FC<LightboxProps> = ({ isOpen, src, onClose, type =
                  src={src} 
                  controls 
                  autoPlay 
+                 crossOrigin="anonymous"
                  style={{ maxWidth: '100%', maxHeight: '90vh', borderRadius: DS.Radius.M }} 
                />
             ) : (
@@ -73,6 +75,7 @@ export const Lightbox: React.FC<LightboxProps> = ({ isOpen, src, onClose, type =
                  layoutId={layoutId}
                  src={src} 
                  alt="Full view" 
+                 crossOrigin="anonymous"
                  style={{ maxWidth: '100%', maxHeight: '90vh', objectFit: 'contain', borderRadius: DS.Radius.M }} 
                />
             )}

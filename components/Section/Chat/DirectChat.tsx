@@ -113,7 +113,7 @@ export const DirectChat: React.FC<DirectChatProps> = ({ friendId }) => {
             <div 
               style={{ 
                 display: 'flex', flexDirection: 'column', height: '100dvh', 
-                background: 'red', width: '100%', maxWidth: theme.layout.maxWidth, margin: '0 auto', position: 'relative', overflow: 'hidden'
+                background: theme.colors.surface1, width: '100%', maxWidth: theme.layout.maxWidth, margin: '0 auto', position: 'relative', overflow: 'hidden'
               }}
             >
                 <ChatHeader title={friendProfile?.username || 'Chat'} onCall={startCall} />

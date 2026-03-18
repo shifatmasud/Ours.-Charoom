@@ -3,23 +3,12 @@ import { createClient } from '@supabase/supabase-js';
 import { Post, Message, Notification, Profile, CurrentUser, Comment } from '../types';
 
 // --- Configuration ---
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_KEY;
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://lezvekpflqbxornefbwh.supabase.co';
+const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxlenZla3BmbHFieG9ybmVmYndoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM3MDM1OTEsImV4cCI6MjA3OTI3OTU5MX0._fN9MxAivt_GyYv81lR7VJUShAPnYQ5txynHxwyrftw';
 
-if (!SUPABASE_URL || !SUPABASE_KEY) {
-  console.warn('Supabase credentials missing. Please set VITE_SUPABASE_URL and VITE_SUPABASE_KEY in your environment.');
-}
+export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-export const supabase = createClient(SUPABASE_URL || '', SUPABASE_KEY || '');
-
-// --- Helpers ---
-
-const withTimeout = async <T,>(promise: Promise<T>, timeoutMs: number = 5000): Promise<T> => {
-  const timeout = new Promise<never>((_, reject) => 
-    setTimeout(() => reject(new Error('Request timed out')), timeoutMs)
-  );
-  return Promise.race([promise, timeout]);
-};
+// --- Schema Adapters ---
 
 // Helper to parse potential JSON content for rich media within the 'content' column
 export const parseMessageContent = (msg: any): Message => {
@@ -82,6 +71,11 @@ export const api = {
     if (error) throw error;
   },
 
+  updatePassword: async (newPassword: string): Promise<void> => {
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    if (error) throw error;
+  },
+
   signOut: async (): Promise<void> => {
     localStorage.removeItem('sb_user_profile');
     await supabase.auth.signOut();
@@ -102,9 +96,11 @@ export const api = {
     // Fetch profile data with a 5s timeout
     const fetchProfile = async () => {
         try {
-            const { data, error } = await withTimeout(
-                supabase.from('profiles').select('*').eq('id', user.id).maybeSingle()
-            ) as any;
+            const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000));
+            const { data, error } = await Promise.race([
+                supabase.from('profiles').select('*').eq('id', user.id).maybeSingle(),
+                timeout
+            ]) as any;
             if (error) console.error('Error fetching profile:', error);
             return data;
         } catch (e) {
@@ -118,7 +114,9 @@ export const api = {
     // Fetch real-time counts directly from follows table - wrap in try/catch to prevent blocking
     const fetchCount = async (query: any) => {
         try {
-            const { count, error } = await withTimeout(query) as any;
+            // Add a 5s timeout for count queries
+            const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 5000));
+            const { count, error } = await Promise.race([query, timeoutPromise]) as any;
             if (error) return 0;
             return count || 0;
         } catch (e) {
@@ -242,9 +240,11 @@ export const api = {
     const { data: { user } } = await supabase.auth.getUser();
 
     // Fetch posts with profiles and real-time counts from related tables
+    // 5s timeout for feed query
     const fetchFeed = async () => {
         try {
-            const { data, error } = await withTimeout(
+            const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000));
+            const { data, error } = await Promise.race([
                 supabase
                 .from('posts')
                 .select(`
@@ -253,8 +253,9 @@ export const api = {
                     likes(count),
                     comments(count)
                 `)
-                .order('created_at', { ascending: false })
-            ) as any;
+                .order('created_at', { ascending: false }),
+                timeout
+            ]) as any;
             if (error) throw error;
             return data || [];
         } catch (e) {
@@ -269,12 +270,14 @@ export const api = {
     let likedPostIds = new Set<string>();
     if (user) {
         try {
-            const { data: likesData } = await withTimeout(
+            const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000));
+            const { data: likesData } = await Promise.race([
                 supabase
                 .from('likes')
                 .select('post_id')
-                .eq('user_id', user.id)
-            ) as any;
+                .eq('user_id', user.id),
+                timeout
+            ]) as any;
             likesData?.forEach((l: any) => likedPostIds.add(l.post_id));
         } catch (e) {
             console.warn('Likes status fetch timed out or failed:', e);
@@ -426,7 +429,7 @@ export const api = {
       return latestMessages;
   },
 
-  sendMessage: async (senderId: string, receiverId: string, content: string, type: 'text' | 'image' | 'audio' = 'text', mediaUrl?: string): Promise<Message> => {
+  sendMessage: async (senderId: string, receiverId: string, content: string, type: 'text' | 'image' | 'audio' = 'text', mediaUrl?: string): Promise<void> => {
       // Pack rich data into 'content' if it's not plain text, to support restricted schema
       let finalContent = content;
       if (type !== 'text' || mediaUrl) {
@@ -437,14 +440,13 @@ export const api = {
           });
       }
 
-      const { data, error } = await supabase.from('messages').insert({ 
+      const { error } = await supabase.from('messages').insert({ 
           sender_id: senderId, 
           receiver_id: receiverId, 
           content: finalContent 
-      }).select().single();
+      });
       
       if (error) throw error;
-      return parseMessageContent(data);
   },
 
   // --- Storage ---
@@ -464,9 +466,11 @@ export const api = {
       if (!user) return [];
       
       try {
-          const { data } = await withTimeout(
-              supabase.from('notifications').select('*, sender_profile:sender_id(*)').eq('user_id', user.id).order('created_at', { ascending: false })
-          ) as any;
+          const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000));
+          const { data } = await Promise.race([
+              supabase.from('notifications').select('*, sender_profile:sender_id(*)').eq('user_id', user.id).order('created_at', { ascending: false }),
+              timeout
+          ]) as any;
           return data || [];
       } catch (e) {
           console.warn('Notifications fetch timed out or failed:', e);

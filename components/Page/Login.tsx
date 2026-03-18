@@ -1,15 +1,15 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { DS } from '../../Theme';
 import { api } from '../../services/supabaseClient';
 import { useNavigate } from 'react-router-dom';
-import { User, Key, SignIn, WarningCircle, IdentificationCard, PaperPlaneRight, ArrowLeft } from '@phosphor-icons/react';
+import { User, Key, SignIn, WarningCircle, IdentificationCard, PaperPlaneRight, ArrowLeft, Lock } from '@phosphor-icons/react';
 import { Button } from '../Core/Button';
 import { Input } from '../Core/Input';
 import { useAuth } from '../../contexts/AuthContext';
 
-type AuthView = 'login' | 'register' | 'reset';
+type AuthView = 'login' | 'register' | 'reset' | 'update-password';
 
 export const Login: React.FC = () => {
   const navigate = useNavigate();
@@ -18,13 +18,21 @@ export const Login: React.FC = () => {
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   
-  // State: 'login' | 'register' | 'reset'
+  // State: 'login' | 'register' | 'reset' | 'update-password'
   const [view, setView] = useState<AuthView>('login');
   
   // Form State
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
   const [fullName, setFullName] = useState('');
+
+  useEffect(() => {
+    const hash = window.location.hash;
+    if (hash.includes('type=recovery')) {
+      setView('update-password');
+    }
+  }, []);
 
   const handleSwitchView = (newView: AuthView) => {
     setView(newView);
@@ -48,6 +56,13 @@ export const Login: React.FC = () => {
             if (!email.trim()) throw new Error("Email is required");
             await api.resetPassword(email);
             setSuccessMsg("Check your email for reset instructions.");
+        } else if (view === 'update-password') {
+            if (!newPassword.trim()) throw new Error("New password is required");
+            await api.updatePassword(newPassword);
+            setSuccessMsg("Password updated successfully! Redirecting...");
+            setTimeout(() => {
+                navigate('/');
+            }, 2000);
         } else {
             // Login (or Secret Guest)
             const user = await api.signInWithPassword(email, password);
@@ -67,6 +82,7 @@ export const Login: React.FC = () => {
     switch(view) {
         case 'register': return "Join the void.";
         case 'reset': return "Recover access.";
+        case 'update-password': return "Set new password.";
         default: return "Enter the void.";
     }
   };
@@ -181,7 +197,7 @@ export const Login: React.FC = () => {
               required
            />
 
-           <AnimatePresence mode="popLayout">
+            <AnimatePresence mode="popLayout">
              {view !== 'reset' && (
                 <motion.div
                    variants={fieldContainerVariants}
@@ -192,10 +208,10 @@ export const Login: React.FC = () => {
                 >
                     <Input 
                         type="password"
-                        placeholder="Password" 
+                        placeholder={view === 'update-password' ? "New Password" : "Password"} 
                         icon={<Key size={20} />}
-                        value={password}
-                        onChange={e => setPassword(e.target.value)}
+                        value={view === 'update-password' ? newPassword : password}
+                        onChange={e => view === 'update-password' ? setNewPassword(e.target.value) : setPassword(e.target.value)}
                         style={{ background: 'rgba(255,255,255,0.05)', marginBottom: '8px' }}
                         required
                     />

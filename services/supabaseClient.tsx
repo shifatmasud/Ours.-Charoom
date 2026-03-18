@@ -59,7 +59,13 @@ export const api = {
                   'Content-Type': 'application/json',
                   'Authorization': `Bearer ${SUPABASE_KEY}`
               },
-              body: JSON.stringify({ userId, senderId, type, referenceId, mediaUrl })
+              body: JSON.stringify({ 
+                  user_id: userId, 
+                  sender_id: senderId, 
+                  type, 
+                  reference_id: referenceId, 
+                  media_url: mediaUrl 
+              })
           });
       } catch (e) {
           console.error("Failed to send notification via Edge Function", e);

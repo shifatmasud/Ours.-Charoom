@@ -36,7 +36,6 @@ export const Feed: React.FC = () => {
   const pressTimer = useRef<number | null>(null);
 
   useEffect(() => {
-    if (!currentUser) return;
     let mounted = true;
     let feedTimeout: any;
 
@@ -54,8 +53,10 @@ export const Feed: React.FC = () => {
         if (mounted) setPosts(feedData);
         
         // Initial Notification Check
-        const notifs = await api.getNotifications();
-        if (mounted) setUnreadCount(notifs.filter(n => !n.is_read).length);
+        if (currentUser) {
+          const notifs = await api.getNotifications();
+          if (mounted) setUnreadCount(notifs.filter(n => !n.is_read).length);
+        }
 
       } catch (e) {
         console.error('Feed: Error loading data:', e);
@@ -68,15 +69,17 @@ export const Feed: React.FC = () => {
     
     // Realtime Notification Subscription
     let channel: any;
-    channel = supabase.channel(`public:notifications:${currentUser.id}`)
-    .on(
-       'postgres_changes',
-       { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${currentUser.id}` },
-       (payload) => {
-           if (mounted) setUnreadCount(prev => prev + 1);
-       }
-    )
-    .subscribe();
+    if (currentUser) {
+      channel = supabase.channel(`public:notifications:${currentUser.id}`)
+      .on(
+         'postgres_changes',
+         { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${currentUser.id}` },
+         (payload) => {
+             if (mounted) setUnreadCount(prev => prev + 1);
+         }
+      )
+      .subscribe();
+    }
 
     return () => {
         mounted = false;
@@ -190,102 +193,111 @@ export const Feed: React.FC = () => {
                OURS<span style={{ color: DS.Color.Accent.Surface }}>.</span>
              </h1>
            </div>
-           
-           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-             <Button variant="ghost" size="icon" onClick={() => navigate('/activity')} style={{ position: 'relative' }}>
-                <Bell size={24} />
-                {unreadCount > 0 && (
-                    <span style={{ 
-                        position: 'absolute', top: 6, right: 6, 
-                        width: '8px', height: '8px', 
-                        background: DS.Color.Accent.Surface, 
-                        borderRadius: '50%',
-                        border: `1px solid ${DS.Color.Base.Surface[1]}`
-                    }} />
-                )}
-             </Button>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+             {currentUser && (
+               <Button variant="ghost" size="icon" onClick={() => navigate('/activity')} style={{ position: 'relative' }}>
+                  <Bell size={24} />
+                  {unreadCount > 0 && (
+                      <span style={{ 
+                          position: 'absolute', top: 6, right: 6, 
+                          width: '8px', height: '8px', 
+                          background: DS.Color.Accent.Surface, 
+                          borderRadius: '50%',
+                          border: `1px solid ${DS.Color.Base.Surface[1]}`
+                      }} />
+                  )}
+               </Button>
+             )}
              <Button variant="ghost" size="icon" onClick={toggleTheme}>
                {mode === 'dark' ? <Moon size={20} /> : <Sun size={20} />}
              </Button>
-             <Link to={`/profile/${currentUser?.id}`}>
-                <Avatar src={currentUser?.avatar_url || ''} alt="me" size="sm" />
-             </Link>
+             {currentUser ? (
+               <Link to={`/profile/${currentUser?.id}`}>
+                  <Avatar src={currentUser?.avatar_url || ''} alt="me" size="sm" />
+               </Link>
+             ) : (
+               <Button variant="primary" size="sm" onClick={() => navigate('/login')}>
+                 Login
+               </Button>
+             )}
            </div>
         </header>
 
         {/* Input Area */}
-        <div style={{ padding: '0 16px 32px 16px' }}>
-          <motion.div 
-            layout
-            style={{ 
-              background: DS.Color.Base.Surface[2],
-              borderRadius: DS.Radius.Full, // Peel/Pill shape
-              padding: '8px 8px 8px 16px', 
-              display: 'flex',
-              alignItems: 'center',
-              gap: '12px',
-              border: `1px solid ${DS.Color.Base.Border}`
-            }}
-          >
-            <input
-                value={caption}
-                onChange={(e) => setCaption(e.target.value)}
-                placeholder="Share a moment..."
-                style={{ 
-                  flex: 1, 
-                  background: 'transparent', 
-                  border: 'none', 
-                  outline: 'none', 
-                  color: DS.Color.Base.Content[1], 
-                  ...DS.Type.Readable.Body
-                }}
-            />
-              
-            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <input 
-                  type="file" 
-                  accept="image/*" 
-                  ref={fileInputRef} 
-                  style={{ display: 'none' }} 
-                  onChange={handleFileSelect}
-                />
+        {currentUser && (
+          <div style={{ padding: '0 16px 32px 16px' }}>
+            <motion.div 
+              layout
+              style={{ 
+                background: DS.Color.Base.Surface[2],
+                borderRadius: DS.Radius.Full, // Peel/Pill shape
+                padding: '8px 8px 8px 16px', 
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+                border: `1px solid ${DS.Color.Base.Border}`
+              }}
+            >
+              <input
+                  value={caption}
+                  onChange={(e) => setCaption(e.target.value)}
+                  placeholder="Share a moment..."
+                  style={{ 
+                    flex: 1, 
+                    background: 'transparent', 
+                    border: 'none', 
+                    outline: 'none', 
+                    color: DS.Color.Base.Content[1], 
+                    ...DS.Type.Readable.Body
+                  }}
+              />
                 
-                <Button variant="ghost" size="icon" onClick={() => fileInputRef.current?.click()}>
-                  <ImageIcon size={20} weight={preview ? 'fill' : 'regular'} color={preview ? DS.Color.Accent.Surface : undefined} />
-                </Button>
-
-                <Button 
-                  variant={caption || file ? "primary" : "secondary"} 
-                  size="icon"
-                  onClick={handlePost}
-                  disabled={(!caption && !file) || isPosting}
-                >
-                  {isPosting ? <CircleNotch className="animate-spin" /> : <PaperPlaneRight size={18} weight="fill" />}
-                </Button>
-            </div>
-          </motion.div>
-          
-          <AnimatePresence>
-             {preview && (
-                <motion.div 
-                  initial={{ opacity: 0, height: 0, marginTop: 0 }}
-                  animate={{ opacity: 1, height: 'auto', marginTop: 8 }}
-                  exit={{ opacity: 0, height: 0, marginTop: 0 }}
-                  style={{ overflow: 'hidden', borderRadius: DS.Radius.M }}
-                >
-                   <div style={{ position: 'relative' }}>
-                     <img src={preview} alt="prev" style={{ width: '100%', height: '200px', objectFit: 'cover', borderRadius: DS.Radius.M }} />
-                     <button onClick={() => { setPreview(null); setFile(null); }} style={{ position: 'absolute', top: 8, right: 8, background: 'rgba(0,0,0,0.5)', color: 'white', border: 'none', borderRadius: '50%', width: 24, height: 24 }}>✕</button>
-                   </div>
-                </motion.div>
-             )}
-          </AnimatePresence>
-        </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <input 
+                    type="file" 
+                    accept="image/*" 
+                    ref={fileInputRef} 
+                    style={{ display: 'none' }} 
+                    onChange={handleFileSelect}
+                  />
+                  
+                  <Button variant="ghost" size="icon" onClick={() => fileInputRef.current?.click()}>
+                    <ImageIcon size={20} weight={preview ? 'fill' : 'regular'} color={preview ? DS.Color.Accent.Surface : undefined} />
+                  </Button>
+  
+                  <Button 
+                    variant={caption || file ? "primary" : "secondary"} 
+                    size="icon"
+                    onClick={handlePost}
+                    disabled={(!caption && !file) || isPosting}
+                  >
+                    {isPosting ? <CircleNotch className="animate-spin" /> : <PaperPlaneRight size={18} weight="fill" />}
+                  </Button>
+              </div>
+            </motion.div>
+            
+            <AnimatePresence>
+               {preview && (
+                  <motion.div 
+                    initial={{ opacity: 0, height: 0, marginTop: 0 }}
+                    animate={{ opacity: 1, height: 'auto', marginTop: 8 }}
+                    exit={{ opacity: 0, height: 0, marginTop: 0 }}
+                    style={{ overflow: 'hidden', borderRadius: DS.Radius.M }}
+                  >
+                     <div style={{ position: 'relative' }}>
+                       <img src={preview} alt="prev" style={{ width: '100%', height: '200px', objectFit: 'cover', borderRadius: DS.Radius.M }} />
+                       <button onClick={() => { setPreview(null); setFile(null); }} style={{ position: 'absolute', top: 8, right: 8, background: 'rgba(0,0,0,0.5)', color: 'white', border: 'none', borderRadius: '50%', width: 24, height: 24 }}>✕</button>
+                     </div>
+                  </motion.div>
+               )}
+            </AnimatePresence>
+          </div>
+        )}
 
         {/* Feed Stream */}
         <div style={{ padding: '0 16px' }}>
           {posts.map((post) => (
-            <PostCard key={post.id} post={post} currentUser={currentUser!} />
+            <PostCard key={post.id} post={post} currentUser={currentUser || undefined} />
           ))}
         </div>
 

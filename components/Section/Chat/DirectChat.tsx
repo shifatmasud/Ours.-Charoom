@@ -86,9 +86,13 @@ export const DirectChat: React.FC<DirectChatProps> = ({ friendId }) => {
         setMessages(prev => [...prev, optimisticMsg]);
 
         try {
-            await api.sendMessage(currentUser.id, friendId, content, type, mediaUrl);
+            const realMsg = await api.sendMessage(currentUser.id, friendId, content, type, mediaUrl);
+            // Replace optimistic message with real one to avoid duplicates when subscription triggers
+            setMessages(prev => prev.map(m => m.id === tempId ? realMsg : m));
         } catch (e) {
             console.error("Send failed", e);
+            // Optionally remove optimistic message or show error
+            setMessages(prev => prev.filter(m => m.id !== tempId));
         }
     };
 

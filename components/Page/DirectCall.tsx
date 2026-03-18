@@ -31,63 +31,61 @@ import { theme, DS, commonStyles } from '../../Theme';
 import { useAuth } from '../../contexts/AuthContext';
 import { Loader } from '../Core/Loader';
 
+const VideoTrackView: React.FC<{ trackPublication: RemoteTrackPublication; participant: RemoteParticipant }> = ({ trackPublication, participant }) => {
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    if (!videoRef.current || !trackPublication.track) return;
+    const track = trackPublication.track as RemoteTrack;
+    track.attach(videoRef.current);
+    return () => {
+      track.detach(videoRef.current!);
+    };
+  }, [trackPublication.track]);
+
+  return (
+    <div style={{ position: 'relative', height: '100%', width: '100%' }}>
+      <video 
+        ref={videoRef}
+        autoPlay
+        playsInline
+        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+      />
+      <div style={{ position: 'absolute', bottom: '20px', left: '20px', background: 'rgba(0,0,0,0.5)', padding: '4px 12px', borderRadius: '20px', color: '#fff', fontSize: '12px', backdropFilter: 'blur(10px)', zIndex: 10 }}>
+        {participant.identity} {trackPublication.source === Track.Source.ScreenShare ? '(Screen)' : ''}
+      </div>
+    </div>
+  );
+};
+
 const RemoteVideo: React.FC<{ participant: RemoteParticipant }> = ({ participant }) => {
-  const videoRefs = useRef<Map<string, HTMLVideoElement>>(new Map());
   const [videoTracks, setVideoTracks] = useState<RemoteTrackPublication[]>([]);
 
   useEffect(() => {
     if (!participant) return;
     const updateTracks = () => {
-      if (participant?.videoTracks) {
-        setVideoTracks(Array.from(participant.videoTracks.values()));
-      } else {
-        setVideoTracks([]);
-      }
+      setVideoTracks(Array.from(participant.videoTracks.values()).filter((p: RemoteTrackPublication) => p.kind === Track.Kind.Video));
     };
 
-    participant.on(ParticipantEvent.TrackSubscribed, (track) => {
-      if (track.kind === Track.Kind.Video) {
-        updateTracks();
-        const el = videoRefs.current.get(track.sid);
-        if (el) track.attach(el);
-      }
-    });
-
-    participant.on(ParticipantEvent.TrackUnsubscribed, (track) => {
-      if (track.kind === Track.Kind.Video) {
-        updateTracks();
-      }
-    });
+    participant.on(ParticipantEvent.TrackSubscribed, updateTracks);
+    participant.on(ParticipantEvent.TrackUnsubscribed, updateTracks);
+    participant.on(ParticipantEvent.TrackPublished, updateTracks);
+    participant.on(ParticipantEvent.TrackUnpublished, updateTracks);
 
     updateTracks();
 
-    // Initial attach for existing tracks
-    participant.videoTracks?.forEach(pub => {
-      if (pub.track && pub.track.kind === Track.Kind.Video) {
-        const el = videoRefs.current.get(pub.track.sid);
-        if (el) pub.track.attach(el);
-      }
-    });
-
     return () => {
-      participant.removeAllListeners();
+      participant.off(ParticipantEvent.TrackSubscribed, updateTracks);
+      participant.off(ParticipantEvent.TrackUnsubscribed, updateTracks);
+      participant.off(ParticipantEvent.TrackPublished, updateTracks);
+      participant.off(ParticipantEvent.TrackUnpublished, updateTracks);
     };
   }, [participant]);
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: videoTracks.length > 1 ? '1fr 1fr' : '1fr', height: '100%', width: '100%', background: '#111' }}>
       {videoTracks.map(pub => (
-        <div key={pub.trackSid} style={{ position: 'relative', height: '100%', width: '100%' }}>
-          <video 
-            ref={el => { if (el) videoRefs.current.set(pub.trackSid, el); }}
-            autoPlay
-            playsInline
-            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-          />
-          <div style={{ position: 'absolute', bottom: '20px', left: '20px', background: 'rgba(0,0,0,0.5)', padding: '4px 12px', borderRadius: '20px', color: '#fff', fontSize: '12px', backdropFilter: 'blur(10px)', zIndex: 10 }}>
-            {participant.identity} {pub.source === Track.Source.ScreenShare ? '(Screen)' : ''}
-          </div>
-        </div>
+        <VideoTrackView key={pub.trackSid} trackPublication={pub} participant={participant} />
       ))}
       {videoTracks.length === 0 && (
         <div style={{ ...commonStyles.flexCenter, height: '100%', flexDirection: 'column', gap: '16px', background: '#111' }}>
@@ -118,27 +116,28 @@ export const DirectCall: React.FC = () => {
 
   const containerRef = useRef<HTMLDivElement>(null);
   const localVideoRef = useRef<HTMLVideoElement>(null);
-  const remoteVideoRefs = useRef<Map<string, HTMLVideoElement>>(new Map());
+  const localVideoTrackRef = useRef<LocalVideoTrack | null>(null);
+  const localAudioTrackRef = useRef<LocalAudioTrack | null>(null);
+
+  // Handle local video attachment when loading state changes or track is created
+  useEffect(() => {
+    if (!loading && localVideoRef.current && localVideoTrackRef.current && !isVideoOff) {
+      localVideoTrackRef.current.attach(localVideoRef.current);
+    }
+  }, [loading, isVideoOff]);
 
   useEffect(() => {
     if (!roomId || !currentUser) return;
 
     const connectToRoom = async () => {
-      let localVideoTrack: LocalVideoTrack | null = null;
-      let localAudioTrack: LocalAudioTrack | null = null;
-
       try {
         setLoading(true);
         setError(null);
 
         // 1. Create local tracks first (better UX + avoids engine race conditions)
         try {
-          localVideoTrack = await createLocalVideoTrack();
-          localAudioTrack = await createLocalAudioTrack();
-          
-          if (localVideoRef.current && localVideoTrack) {
-            localVideoTrack.attach(localVideoRef.current);
-          }
+          localVideoTrackRef.current = await createLocalVideoTrack();
+          localAudioTrackRef.current = await createLocalAudioTrack();
         } catch (trackError) {
           console.warn('Could not acquire media devices:', trackError);
           // We continue even if tracks fail, as user might want to join as listener
@@ -191,8 +190,8 @@ export const DirectCall: React.FC = () => {
         // This specifically avoids "publishing rejected as engine not connected within timeout"
         setTimeout(async () => {
           try {
-            if (localVideoTrack) await r.localParticipant.publishTrack(localVideoTrack);
-            if (localAudioTrack) await r.localParticipant.publishTrack(localAudioTrack);
+            if (localVideoTrackRef.current) await r.localParticipant.publishTrack(localVideoTrackRef.current);
+            if (localAudioTrackRef.current) await r.localParticipant.publishTrack(localAudioTrackRef.current);
           } catch (pubError) {
             console.error('Failed to publish tracks:', pubError);
           }
@@ -207,8 +206,10 @@ export const DirectCall: React.FC = () => {
         setLoading(false);
         
         // Cleanup on error
-        localVideoTrack?.stop();
-        localAudioTrack?.stop();
+        localVideoTrackRef.current?.stop();
+        localAudioTrackRef.current?.stop();
+        localVideoTrackRef.current = null;
+        localAudioTrackRef.current = null;
       }
     };
 
@@ -217,25 +218,65 @@ export const DirectCall: React.FC = () => {
     return () => {
       roomRef.current?.disconnect();
       roomRef.current = null;
+      localVideoTrackRef.current?.stop();
+      localAudioTrackRef.current?.stop();
+      localVideoTrackRef.current = null;
+      localAudioTrackRef.current = null;
     };
   }, [roomId, currentUser]);
 
   const toggleMute = async () => {
-    if (!room) return;
-    const enabled = !isMuted;
-    await room.localParticipant.setMicrophoneEnabled(!enabled);
-    setIsMuted(enabled);
+    const nextMuted = !isMuted;
+    setIsMuted(nextMuted);
+    
+    if (room && room.state === 'connected') {
+      try {
+        await room.localParticipant.setMicrophoneEnabled(!nextMuted);
+      } catch (e) {
+        console.error('Failed to toggle microphone:', e);
+      }
+    } else if (localAudioTrackRef.current) {
+      try {
+        // Use setEnabled if available, otherwise fallback to direct property access
+        if (typeof localAudioTrackRef.current.setEnabled === 'function') {
+          await localAudioTrackRef.current.setEnabled(!nextMuted);
+        } else {
+          // @ts-ignore - fallback for unexpected track objects
+          localAudioTrackRef.current.enabled = !nextMuted;
+        }
+      } catch (e) {
+        console.error('Failed to toggle local audio track:', e);
+      }
+    }
   };
 
   const toggleVideo = async () => {
-    if (!room) return;
-    const off = !isVideoOff;
-    await room.localParticipant.setCameraEnabled(!off);
-    setIsVideoOff(off);
+    const nextVideoOff = !isVideoOff;
+    setIsVideoOff(nextVideoOff);
+    
+    if (room && room.state === 'connected') {
+      try {
+        await room.localParticipant.setCameraEnabled(!nextVideoOff);
+      } catch (e) {
+        console.error('Failed to toggle camera:', e);
+      }
+    } else if (localVideoTrackRef.current) {
+      try {
+        // Use setEnabled if available, otherwise fallback to direct property access
+        if (typeof localVideoTrackRef.current.setEnabled === 'function') {
+          await localVideoTrackRef.current.setEnabled(!nextVideoOff);
+        } else {
+          // @ts-ignore - fallback for unexpected track objects
+          localVideoTrackRef.current.enabled = !nextVideoOff;
+        }
+      } catch (e) {
+        console.error('Failed to toggle local video track:', e);
+      }
+    }
   };
 
   const toggleScreenShare = async () => {
-    if (!room) return;
+    if (!room || room.state !== 'connected') return;
     
     // Check support
     if (!navigator.mediaDevices || !('getDisplayMedia' in navigator.mediaDevices)) {
@@ -341,21 +382,74 @@ export const DirectCall: React.FC = () => {
         )}
       </motion.div>
 
+      {/* Media Menu (Moved outside to fix backdrop-filter issues) */}
+      <AnimatePresence>
+        {isMediaMenuOpen && (
+          <motion.div
+            initial={{ opacity: 0, y: 10, scale: 0.9, x: '-50%' }}
+            animate={{ opacity: 1, y: 0, scale: 1, x: '-50%' }}
+            exit={{ opacity: 0, y: 10, scale: 0.9, x: '-50%' }}
+            style={{
+              position: 'absolute',
+              bottom: '140px',
+              left: '50%',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px',
+              background: 'rgba(255, 255, 255, 0.12)',
+              padding: '12px',
+              borderRadius: '24px',
+              backdropFilter: DS.Effect.Blur.Frosted,
+              WebkitBackdropFilter: DS.Effect.Blur.Frosted,
+              border: '1px solid rgba(255, 255, 255, 0.15)',
+              boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
+              zIndex: 101,
+              transformStyle: 'preserve-3d',
+            }}
+          >
+            <button 
+              onClick={() => { toggleVideo(); setIsMediaMenuOpen(false); }}
+              style={{ 
+                width: '48px', height: '48px', borderRadius: '50%', border: 'none', 
+                background: isVideoOff ? DS.Color.Status.Error : 'rgba(255,255,255,0.1)',
+                color: '#fff', cursor: 'pointer', ...commonStyles.flexCenter, transition: 'all 0.2s'
+              }}
+            >
+              {isVideoOff ? <VideoCameraSlash size={20} weight="fill" /> : <VideoCamera size={20} weight="fill" />}
+            </button>
+
+            <button 
+              onClick={() => { toggleScreenShare(); setIsMediaMenuOpen(false); }}
+              style={{ 
+                width: '48px', height: '48px', borderRadius: '50%', border: 'none', 
+                background: isScreenSharing ? DS.Color.Accent.Surface : 'rgba(255,255,255,0.1)',
+                color: '#fff', cursor: 'pointer', ...commonStyles.flexCenter, transition: 'all 0.2s'
+              }}
+            >
+              <Monitor size={20} weight={isScreenSharing ? "fill" : "regular"} />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Controls */}
       <div style={{ 
         position: 'absolute', 
         bottom: '40px', 
         left: '50%', 
-        transform: 'translateX(-50%)', 
+        transform: 'translateX(-50%) translateZ(0)', 
         display: 'flex', 
         gap: '20px', 
         alignItems: 'center',
-        background: 'rgba(255,255,255,0.08)',
+        background: 'rgba(255, 255, 255, 0.12)',
         padding: '12px 24px',
         borderRadius: '40px',
         backdropFilter: DS.Effect.Blur.Frosted,
-        border: '1px solid rgba(255,255,255,0.1)',
-        zIndex: 100
+        WebkitBackdropFilter: DS.Effect.Blur.Frosted,
+        border: '1px solid rgba(255, 255, 255, 0.15)',
+        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
+        zIndex: 100,
+        isolation: 'isolate'
       }}>
         <button 
           onClick={toggleMute}
@@ -380,53 +474,6 @@ export const DirectCall: React.FC = () => {
         </button>
 
         <div style={{ position: 'relative' }}>
-          <AnimatePresence>
-            {isMediaMenuOpen && (
-              <motion.div
-                initial={{ opacity: 0, y: 10, scale: 0.9 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: 10, scale: 0.9 }}
-                style={{
-                  position: 'absolute',
-                  bottom: '70px',
-                  left: '50%',
-                  transform: 'translateX(-50%)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '12px',
-                  background: 'rgba(255,255,255,0.08)',
-                  padding: '12px',
-                  borderRadius: '24px',
-                  backdropFilter: DS.Effect.Blur.Frosted,
-                  WebkitBackdropFilter: DS.Effect.Blur.Frosted,
-                  border: '1px solid rgba(255,255,255,0.1)',
-                }}
-              >
-                <button 
-                  onClick={() => { toggleVideo(); setIsMediaMenuOpen(false); }}
-                  style={{ 
-                    width: '48px', height: '48px', borderRadius: '50%', border: 'none', 
-                    background: isVideoOff ? DS.Color.Status.Error : 'rgba(255,255,255,0.1)',
-                    color: '#fff', cursor: 'pointer', ...commonStyles.flexCenter, transition: 'all 0.2s'
-                  }}
-                >
-                  {isVideoOff ? <VideoCameraSlash size={20} weight="fill" /> : <VideoCamera size={20} weight="fill" />}
-                </button>
-
-                <button 
-                  onClick={() => { toggleScreenShare(); setIsMediaMenuOpen(false); }}
-                  style={{ 
-                    width: '48px', height: '48px', borderRadius: '50%', border: 'none', 
-                    background: isScreenSharing ? DS.Color.Accent.Surface : 'rgba(255,255,255,0.1)',
-                    color: '#fff', cursor: 'pointer', ...commonStyles.flexCenter, transition: 'all 0.2s'
-                  }}
-                >
-                  <Monitor size={20} weight={isScreenSharing ? "fill" : "regular"} />
-                </button>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
           <button 
             onClick={() => setIsMediaMenuOpen(!isMediaMenuOpen)}
             style={{ 
@@ -447,10 +494,15 @@ export const DirectCall: React.FC = () => {
         onClick={() => navigate(-1)}
         style={{ 
           position: 'absolute', top: '40px', left: '20px', 
-          background: 'rgba(255,255,255,0.08)', border: 'none', borderRadius: '12px', 
+          background: 'rgba(255, 255, 255, 0.12)', borderRadius: '12px', 
           padding: '8px 16px', color: '#fff', cursor: 'pointer',
-          display: 'flex', alignItems: 'center', gap: '8px', backdropFilter: DS.Effect.Blur.Frosted,
-          zIndex: 100
+          display: 'flex', alignItems: 'center', gap: '8px', 
+          backdropFilter: DS.Effect.Blur.Frosted,
+          WebkitBackdropFilter: DS.Effect.Blur.Frosted,
+          border: '1px solid rgba(255, 255, 255, 0.15)',
+          zIndex: 100,
+          transform: 'translateZ(0)',
+          isolation: 'isolate'
         }}
       >
         <CaretLeft size={18} /> Exit

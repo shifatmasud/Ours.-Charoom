@@ -64,7 +64,7 @@ export const PostDetail: React.FC = () => {
     return <Loader fullscreen label="LOADING MOMENT" />;
   }
 
-  if (!post || !currentUser) {
+  if (!post) {
     return (
       <div style={{ ...commonStyles.flexCenter, height: '100vh', width: '100%', flexDirection: 'column', background: theme.colors.surface1, color: theme.colors.text2 }}>
         <p>Moment not found.</p>

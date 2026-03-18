@@ -32,7 +32,6 @@ export const Profile: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (!currentUser) return;
     let mounted = true;
     let profileTimeout: any;
 
@@ -48,7 +47,11 @@ export const Profile: React.FC = () => {
           }
         }, 5000);
 
-        const targetId = userId || currentUser.id;
+        const targetId = userId || currentUser?.id;
+        if (!targetId) {
+            setLoading(false);
+            return;
+        }
         
         const [fetchedProfile, fetchedPosts] = await Promise.all([
           api.getUserProfile(targetId),
@@ -59,7 +62,7 @@ export const Profile: React.FC = () => {
           setProfileUser(fetchedProfile);
           setPosts(fetchedPosts);
           
-          if (targetId === currentUser.id) {
+          if (currentUser && targetId === currentUser.id) {
             setEditName(fetchedProfile.full_name || '');
             setEditBio(fetchedProfile.bio || '');
           }
@@ -115,7 +118,11 @@ export const Profile: React.FC = () => {
   };
 
   const handleFollowToggle = async () => {
-    if (!currentUser || !profileUser) return;
+    if (!currentUser) {
+        navigate('/login');
+        return;
+    }
+    if (!profileUser) return;
     try {
       if (profileUser.is_following) {
         await api.unfollowUser(currentUser.id, profileUser.id);
@@ -130,6 +137,10 @@ export const Profile: React.FC = () => {
   };
 
   const handleMessage = () => {
+    if (!currentUser) {
+        navigate('/login');
+        return;
+    }
     if (profileUser) {
       navigate(`/messages/${profileUser.id}`);
     }
@@ -139,9 +150,9 @@ export const Profile: React.FC = () => {
     return <Loader fullscreen label="FETCHING PROFILE" />;
   }
 
-  if (!profileUser || !currentUser) return null;
+  if (!profileUser) return null;
 
-  const isMyProfile = profileUser.id === currentUser.id;
+  const isMyProfile = currentUser && profileUser.id === currentUser.id;
 
   return (
     // Removed motion page transitions from root to keep header static

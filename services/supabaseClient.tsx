@@ -127,7 +127,7 @@ export const parseMessageContent = (msg: any): Message => {
 // --- API Implementation ---
 
 export const api = {
-  sendNotification: async (userId: string, senderId: string, type: 'like' | 'comment' | 'follow', referenceId: string, mediaUrl?: string): Promise<void> => {
+  sendNotification: async (userId: string, senderId: string, type: 'like' | 'comment' | 'follow', referenceId: string, mediaUrl?: string, senderUsername?: string): Promise<void> => {
       try {
           // Try Edge Function first
           const response = await fetch(`${SUPABASE_URL}/functions/v1/send-notification`, {
@@ -141,7 +141,8 @@ export const api = {
                   sender_id: senderId, 
                   type, 
                   reference_id: referenceId, 
-                  media_url: mediaUrl 
+                  media_url: mediaUrl,
+                  sender_username: senderUsername
               })
           });
 
@@ -152,19 +153,30 @@ export const api = {
           console.warn("Edge Function failed or missing, falling back to direct DB insert", e);
           // Fallback: Direct insert into notifications table
           try {
-              const { error } = await supabase.from('notifications').insert({
+              const { data: insertedData, error } = await supabase.from('notifications').insert({
                   user_id: userId,
                   sender_id: senderId,
                   type,
                   reference_id: referenceId,
                   media_url: mediaUrl,
                   is_read: false
-              });
+              }).select('*, sender_profile:profiles!sender_id(*), receiver_profile:profiles!user_id(*)').single();
+              
               if (error) throw error;
+
+              // Broadcast to GLOBAL channel so everyone sees it instantly
+              const globalChannel = supabase.channel('global_activities');
+              await globalChannel.send({
+                  type: 'broadcast',
+                  event: 'activity',
+                  payload: { 
+                      ...insertedData,
+                      sender_profile: Array.isArray(insertedData.sender_profile) ? insertedData.sender_profile[0] : insertedData.sender_profile,
+                      receiver_profile: Array.isArray(insertedData.receiver_profile) ? insertedData.receiver_profile[0] : insertedData.receiver_profile
+                  }
+              });
           } catch (dbErr: any) {
-              console.error("Direct notification insert also failed", dbErr);
-              // Don't throw here to avoid breaking the main action (like/comment)
-              // but we log it for debugging
+              console.error("Direct notification insert or broadcast failed", dbErr);
           }
       }
   },
@@ -521,7 +533,7 @@ export const api = {
     await supabase.from('posts').delete().eq('id', postId);
   },
 
-  likePost: async (postId: string, userId: string, ownerId: string): Promise<void> => {
+  likePost: async (postId: string, userId: string, ownerId: string, senderUsername?: string): Promise<void> => {
     // Check if already liked
     const { data } = await supabase.from('likes').select('id').match({ user_id: userId, post_id: postId }).single();
     
@@ -531,7 +543,7 @@ export const api = {
         await supabase.from('likes').insert({ user_id: userId, post_id: postId });
         // Trigger notification if not self-like
         if (userId !== ownerId) {
-            await api.sendNotification(ownerId, userId, 'like', postId);
+            await api.sendNotification(ownerId, userId, 'like', postId, undefined, senderUsername);
         }
     }
   },
@@ -545,13 +557,13 @@ export const api = {
     return data || [];
   },
 
-  addComment: async (postId: string, userId: string, content: string, ownerId: string): Promise<Comment> => {
+  addComment: async (postId: string, userId: string, content: string, ownerId: string, senderUsername?: string): Promise<Comment> => {
     const { data, error } = await supabase.from('comments').insert({ post_id: postId, user_id: userId, content }).select('*, profile:user_id(*)').single();
     if (error) throw error;
     
     // Trigger notification if not self-comment
     if (userId !== ownerId) {
-        await api.sendNotification(ownerId, userId, 'comment', postId);
+        await api.sendNotification(ownerId, userId, 'comment', postId, undefined, senderUsername);
     }
     
     return data;
@@ -562,10 +574,10 @@ export const api = {
   },
 
   // --- Interactions ---
-  followUser: async (followerId: string, targetId: string): Promise<void> => {
+  followUser: async (followerId: string, targetId: string, senderUsername?: string): Promise<void> => {
       await supabase.from('follows').insert({ follower_id: followerId, following_id: targetId });
       // Trigger notification
-      await api.sendNotification(targetId, followerId, 'follow', targetId);
+      await api.sendNotification(targetId, followerId, 'follow', targetId, undefined, senderUsername);
   },
 
   unfollowUser: async (followerId: string, targetId: string): Promise<void> => {
@@ -663,17 +675,13 @@ export const api = {
 
   // --- Notifications ---
   getNotifications: async (): Promise<Notification[]> => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return [];
-      
       try {
           const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 8000));
           const { data, error } = await Promise.race([
               supabase.from('notifications')
-                .select('*, sender_profile:profiles!sender_id(*)')
-                .eq('user_id', user.id)
+                .select('*, sender_profile:profiles!sender_id(*), receiver_profile:profiles!user_id(*)')
                 .order('created_at', { ascending: false })
-                .limit(50),
+                .limit(100),
               timeout
           ]) as any;
           
@@ -684,7 +692,8 @@ export const api = {
           
           return (data || []).map((n: any) => ({
               ...n,
-              sender_profile: Array.isArray(n.sender_profile) ? n.sender_profile[0] : n.sender_profile
+              sender_profile: Array.isArray(n.sender_profile) ? n.sender_profile[0] : n.sender_profile,
+              receiver_profile: Array.isArray(n.receiver_profile) ? n.receiver_profile[0] : n.receiver_profile
           }));
       } catch (e: any) {
           if (e instanceof Error && e.message === 'timeout') {

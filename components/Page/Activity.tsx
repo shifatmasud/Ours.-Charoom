@@ -60,28 +60,40 @@ export const Activity: React.FC = () => {
     // Real-time Subscription
     let channel: any;
     const subscribe = async () => {
-        if (!user) return;
         if (channel) {
             await supabase.removeChannel(channel);
         }
         
-        console.log("Activity: Subscribing to notifications for user", user.id);
+        console.log("Activity: Subscribing to GLOBAL activities");
         
-        channel = supabase.channel(`activity_realtime_${user.id}`)
+        // Use global channel for all activities
+        channel = supabase.channel('global_activities')
+            // 1. Instant Delivery via Broadcast (from Edge Function or Client)
+            .on('broadcast', { event: 'activity' }, async (payload) => {
+                console.log("Activity: Global broadcast received", payload);
+                if (mounted) {
+                    // Prepend the new notification instantly
+                    if (payload.payload) {
+                        setNotifications(prev => [payload.payload, ...prev].slice(0, 100));
+                    } else {
+                        await fetchNotifications();
+                    }
+                }
+            })
+            // 2. Consistency via Postgres Changes (DB sync)
             .on(
                 'postgres_changes',
-                { event: '*', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` },
+                { event: 'INSERT', schema: 'public', table: 'notifications' },
                 async (payload) => {
-                    console.log("Activity: Real-time event received", payload.eventType, payload);
+                    console.log("Activity: Global DB insert received", payload);
                     if (mounted) {
-                        // For INSERT, we definitely want to refresh
-                        // For UPDATE/DELETE, we also refresh to keep UI in sync
+                        // Refresh to ensure we have the latest DB state with profiles
                         await fetchNotifications();
                     }
                 }
             )
             .subscribe(async (status, err) => {
-                console.log("Activity: Subscription status:", status, err);
+                console.log("Activity: Global subscription status:", status, err);
                 if (mounted) setIsLive(status === 'SUBSCRIBED');
                 
                 if (status === 'CHANNEL_ERROR') {
@@ -89,16 +101,14 @@ export const Activity: React.FC = () => {
                     if (channel) await supabase.removeChannel(channel);
                     setTimeout(() => {
                         if (mounted) {
-                            console.log("Activity: Retrying subscription...");
+                            console.log("Activity: Retrying global subscription...");
                             subscribe();
                         }
                     }, 5000);
                 }
             });
     };
-    if (user) {
-        subscribe();
-    }
+    subscribe();
 
     return () => {
         mounted = false;
@@ -228,6 +238,7 @@ export const Activity: React.FC = () => {
                             icon={getIcon(n.type)} 
                             iconBg={getIconBg(n.type)}
                             onClick={() => handleInteraction(n)}
+                            currentUser={user}
                         />
                     ))
                 )}
@@ -249,9 +260,10 @@ interface NotificationItemProps {
     icon: React.ReactNode;
     iconBg: string;
     onClick: () => void;
+    currentUser: any;
 }
 
-const NotificationItem: React.FC<NotificationItemProps> = ({ notification, index, icon, iconBg, onClick }) => {
+const NotificationItem: React.FC<NotificationItemProps> = ({ notification, index, icon, iconBg, onClick, currentUser }) => {
     let timeLabel = '';
     try {
         timeLabel = formatDistanceToNow(new Date(notification.created_at), { addSuffix: true })
@@ -309,9 +321,15 @@ const NotificationItem: React.FC<NotificationItemProps> = ({ notification, index
                  <p style={{ fontSize: '14px', lineHeight: '1.4', color: theme.colors.text1, margin: 0 }}>
                      <span style={{ fontWeight: 600 }}>{notification.sender_profile?.username}</span>
                      <span style={{ color: theme.colors.text2, marginLeft: '4px' }}>
-                         {notification.type === 'like' && 'liked your moment.'}
-                         {notification.type === 'comment' && 'commented on your moment.'}
-                         {notification.type === 'follow' && 'started following you.'}
+                         {notification.type === 'like' && (
+                             <>liked <span style={{ fontWeight: 600 }}>{notification.user_id === currentUser?.id ? 'your' : `${notification.receiver_profile?.username}'s`}</span> moment.</>
+                         )}
+                         {notification.type === 'comment' && (
+                             <>commented on <span style={{ fontWeight: 600 }}>{notification.user_id === currentUser?.id ? 'your' : `${notification.receiver_profile?.username}'s`}</span> moment.</>
+                         )}
+                         {notification.type === 'follow' && (
+                             <>started following <span style={{ fontWeight: 600 }}>{notification.user_id === currentUser?.id ? 'you' : notification.receiver_profile?.username}</span>.</>
+                         )}
                      </span>
                  </p>
                  <span style={{ fontSize: '12px', color: theme.colors.text3, fontWeight: 500 }}>{timeLabel}</span>

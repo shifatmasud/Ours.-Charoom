@@ -67,16 +67,54 @@ const NotificationContainer = () => {
 
     useEffect(() => {
         if(!user) return;
-        const channel = supabase.channel('global_notif_listener')
-            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` }, payload => {
-                const type = payload.new.type;
-                let msg = "New notification";
-                if(type === 'like') msg = "Someone liked your moment";
-                if(type === 'comment') msg = "New comment on your moment";
-                if(type === 'follow') msg = "You have a new follower";
+        
+        // Use global channel for all platform activities
+        const channel = supabase.channel('global_activities')
+            // 1. Instant Delivery via Broadcast
+            .on('broadcast', { event: 'activity' }, payload => {
+                console.log("App: Global broadcast activity received", payload);
+                const { type, sender_profile, receiver_profile, user_id } = payload.payload || {};
                 
-                setToast({ message: msg, visible: true });
-                setTimeout(() => setToast(null), 3000);
+                const senderName = sender_profile?.username || 'Someone';
+                const receiverName = user_id === user.id ? 'your' : `${receiver_profile?.username}'s`;
+                const receiverNameFollow = user_id === user.id ? 'you' : receiver_profile?.username;
+
+                let msg = "";
+                if(type === 'like') msg = `${senderName} liked ${receiverName} moment`;
+                if(type === 'comment') msg = `${senderName} commented on ${receiverName} moment`;
+                if(type === 'follow') msg = `${senderName} started following ${receiverNameFollow}`;
+                
+                if (msg) {
+                    setToast({ message: msg, visible: true });
+                    setTimeout(() => setToast(null), 3000);
+                }
+            })
+            // 2. Consistency via Postgres Changes (DB sync)
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications' }, async (payload) => {
+                console.log("App: Global DB notification received", payload);
+                
+                // Fetch profiles for the toast if broadcast was missed
+                const { data: notif } = await supabase
+                    .from('notifications')
+                    .select('*, sender_profile:profiles!sender_id(*), receiver_profile:profiles!user_id(*)')
+                    .eq('id', payload.new.id)
+                    .single();
+
+                if (notif) {
+                    const senderName = notif.sender_profile?.username || 'Someone';
+                    const receiverName = notif.user_id === user.id ? 'your' : `${notif.receiver_profile?.username}'s`;
+                    const receiverNameFollow = notif.user_id === user.id ? 'you' : notif.receiver_profile?.username;
+
+                    let msg = "";
+                    if(notif.type === 'like') msg = `${senderName} liked ${receiverName} moment`;
+                    if(notif.type === 'comment') msg = `${senderName} commented on ${receiverName} moment`;
+                    if(notif.type === 'follow') msg = `${senderName} started following ${receiverNameFollow}`;
+
+                    if (msg) {
+                        setToast({ message: msg, visible: true });
+                        setTimeout(() => setToast(null), 3000);
+                    }
+                }
             })
             .subscribe();
 

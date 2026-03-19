@@ -68,7 +68,7 @@ export const PostCard: React.FC<PostCardProps> = ({ post, currentUser }) => {
     }
 
     try {
-       await api.likePost(post.id, currentUser.id, post.user_id);
+       await api.likePost(post.id, currentUser.id, post.user_id, currentUser.username);
     } catch (e) {
        console.error("Failed to toggle like", e);
     }
@@ -89,7 +89,7 @@ export const PostCard: React.FC<PostCardProps> = ({ post, currentUser }) => {
     const text = newComment;
     setNewComment('');
     try {
-      const savedComment = await api.addComment(post.id, currentUser.id, text, post.user_id);
+      const savedComment = await api.addComment(post.id, currentUser.id, text, post.user_id, currentUser.username);
       setComments(prev => [...prev, savedComment]);
     } catch (e) {
       console.error("Failed to comment", e);

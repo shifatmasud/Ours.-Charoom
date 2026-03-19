@@ -121,7 +121,7 @@ export const Profile: React.FC = () => {
         await api.unfollowUser(currentUser.id, profileUser.id);
         setProfileUser(prev => prev ? ({ ...prev, is_following: false, followers_count: (prev.followers_count || 1) - 1 }) : null);
       } else {
-        await api.followUser(currentUser.id, profileUser.id);
+        await api.followUser(currentUser.id, profileUser.id, currentUser.username);
         setProfileUser(prev => prev ? ({ ...prev, is_following: true, followers_count: (prev.followers_count || 0) + 1 }) : null);
       }
     } catch (e) {

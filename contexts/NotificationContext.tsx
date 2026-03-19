@@ -41,6 +41,9 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   const markAsRead = async (id: string) => {
     try {
+      const notifToMark = notifications.find(n => n.id === id);
+      if (!notifToMark || notifToMark.user_id !== user?.id) return;
+
       setNotifications(prev => {
         const notif = prev.find(n => n.id === id);
         if (notif && !notif.is_read && notif.user_id === user?.id) {

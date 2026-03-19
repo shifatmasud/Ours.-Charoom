@@ -204,45 +204,19 @@ export const api = {
           }
       });
 
-      // 2. Edge Function (Persistence & Truth)
+      // 2. Direct DB Insert (Persistence & Truth)
       try {
-          const response = await fetch(`${SUPABASE_URL}/functions/v1/send-notification`, {
-              method: 'POST',
-              headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${SUPABASE_KEY}`
-              },
-              body: JSON.stringify({ 
-                  user_id: userId, 
-                  sender_id: senderId, 
-                  type, 
-                  reference_id: dbReferenceId, 
-                  data: {
-                      media_url: mediaUrl,
-                      sender_username: senderUsername
-                  }
-              })
+          // Note: We omit media_url from DB insert as it might not be in the schema
+          const { error } = await supabase.from('notifications').insert({
+              user_id: userId,
+              sender_id: senderId,
+              type,
+              reference_id: dbReferenceId,
+              is_read: false
           });
-
-          if (!response.ok) {
-              throw new Error(`Edge Function returned ${response.status}`);
-          }
-      } catch (e: any) {
-          console.warn("Edge Function failed, falling back to direct DB insert", e);
-          // Fallback: Direct insert into notifications table
-          try {
-              // Note: We omit media_url from DB insert as it might not be in the schema
-              const { error } = await supabase.from('notifications').insert({
-                  user_id: userId,
-                  sender_id: senderId,
-                  type,
-                  reference_id: dbReferenceId,
-                  is_read: false
-              });
-              if (error) throw error;
-          } catch (dbErr: any) {
-              console.error("Direct notification insert failed:", dbErr.message, dbErr.details, dbErr.hint);
-          }
+          if (error) throw error;
+      } catch (dbErr: any) {
+          console.error("Direct notification insert failed:", dbErr.message, dbErr.details, dbErr.hint);
       }
   },
 

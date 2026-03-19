@@ -170,8 +170,35 @@ export const api = {
   },
 
   sendNotification: async (userId: string, senderId: string, type: string, referenceId: string, mediaUrl?: string, senderUsername?: string): Promise<void> => {
+      // 1. Instant Broadcast (Optimistic Delivery)
+      // This ensures the receiver sees it immediately without waiting for the Edge Function or DB
+      const broadcastPayload = {
+          id: `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          user_id: userId,
+          sender_id: senderId,
+          type,
+          reference_id: referenceId,
+          media_url: mediaUrl,
+          sender_username: senderUsername,
+          created_at: new Date().toISOString(),
+          is_read: false
+      };
+
+      const channel = supabase.channel('global_activities');
+      channel.subscribe((status) => {
+          if (status === 'SUBSCRIBED') {
+              channel.send({
+                  type: 'broadcast',
+                  event: 'activity',
+                  payload: broadcastPayload
+              }).then(() => {
+                  supabase.removeChannel(channel);
+              });
+          }
+      });
+
+      // 2. Edge Function (Persistence & Truth)
       try {
-          // Try Edge Function first
           const response = await fetch(`${SUPABASE_URL}/functions/v1/send-notification`, {
               method: 'POST',
               headers: {
@@ -195,43 +222,17 @@ export const api = {
           console.warn("Edge Function failed or missing, falling back to direct DB insert", e);
           // Fallback: Direct insert into notifications table
           try {
-              const { data: insertedData, error } = await supabase.from('notifications').insert({
+              const { error } = await supabase.from('notifications').insert({
                   user_id: userId,
                   sender_id: senderId,
                   type,
                   reference_id: referenceId,
                   media_url: mediaUrl,
                   is_read: false
-              }).select('*, sender_profile:profiles!sender_id(*), receiver_profile:profiles!user_id(*)').single();
-              
-              if (error) throw error;
-
-              // Broadcast to GLOBAL channel so everyone sees it instantly
-              const sendChannel = supabase.channel('global_activities');
-              sendChannel.subscribe((status) => {
-                  if (status === 'SUBSCRIBED') {
-                      sendChannel.send({
-                          type: 'broadcast',
-                          event: 'activity',
-                          payload: { 
-                              ...insertedData,
-                              sender_profile: Array.isArray(insertedData.sender_profile) ? insertedData.sender_profile[0] : insertedData.sender_profile,
-                              receiver_profile: Array.isArray(insertedData.receiver_profile) ? insertedData.receiver_profile[0] : insertedData.receiver_profile
-                          }
-                      }).then(() => {
-                          console.log("Broadcast sent successfully on global_activities");
-                          // We don't remove the channel here because it's a shared channel name, 
-                          // but since we just created this instance, we can untrack it or just let it be.
-                          // Actually, it's better to remove this specific instance to avoid leaks.
-                          supabase.removeChannel(sendChannel);
-                      }).catch(err => {
-                          console.error("Broadcast failed", err);
-                          supabase.removeChannel(sendChannel);
-                      });
-                  }
               });
+              if (error) throw error;
           } catch (dbErr: any) {
-              console.error("Direct notification insert or broadcast failed", dbErr);
+              console.error("Direct notification insert failed", dbErr);
           }
       }
   },

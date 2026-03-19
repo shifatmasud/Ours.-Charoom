@@ -54,7 +54,8 @@ export interface Notification {
   reference_id: string;
   is_read: boolean;
   created_at: string;
-  sender_profile?: Profile; // Virtual/Joined
-  receiver_profile?: Profile; // Virtual/Joined
-  media_url?: string; // Virtual/Joined for post thumbnail
+  sender_profile?: Profile;
+  receiver_profile?: Profile;
+  media_url?: string;
+  sender_username?: string; // Added for broadcast context
 }

@@ -17,6 +17,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useNotifications } from '../../contexts/NotificationContext';
 
 export const Feed: React.FC = () => {
+  console.log('Feed: Rendering');
   const { user: currentUser } = useAuth();
   const { unreadCount } = useNotifications();
   const { mode, toggleTheme } = useTheme();
@@ -39,7 +40,6 @@ export const Feed: React.FC = () => {
   useEffect(() => {
     let mounted = true;
     let feedTimeout: any;
-    let channel: any = null;
 
     const loadData = async () => {
       try {
@@ -52,25 +52,12 @@ export const Feed: React.FC = () => {
         }, 5000);
 
         const feedData = await api.getFeed();
-        if (mounted) {
-            setPosts(feedData);
-            setLoading(false);
-            if (feedTimeout) clearTimeout(feedTimeout);
-        }
-
-        // Subscribe to new posts
-        channel = api.subscribeToPosts((newPost) => {
-            if (!mounted) return;
-            setPosts(prev => {
-                // Avoid duplicates (e.g. if current user posted)
-                if (prev.find(p => p.id === newPost.id)) return prev;
-                return [newPost, ...prev];
-            });
-        });
-
+        if (mounted) setPosts(feedData);
       } catch (e) {
         console.error('Feed: Error loading data:', e);
+      } finally {
         if (mounted) setLoading(false);
+        if (feedTimeout) clearTimeout(feedTimeout);
       }
     };
     loadData();
@@ -79,7 +66,6 @@ export const Feed: React.FC = () => {
         mounted = false;
         if (pressTimer.current) clearTimeout(pressTimer.current);
         if (feedTimeout) clearTimeout(feedTimeout);
-        if (channel) supabase.removeChannel(channel);
     };
 
   }, [currentUser]);

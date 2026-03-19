@@ -83,19 +83,12 @@ export const Feed: React.FC = () => {
 
     setIsPosting(true);
     try {
-      let imageUrl = '';
-      if (file) {
-         imageUrl = await api.uploadFile(file);
-      } else {
-         imageUrl = `https://picsum.photos/seed/${Date.now()}/600/600`; 
-      }
-      
-      await api.createPost(imageUrl, caption, currentUser.id);
+      const fallbackImageUrl = `https://picsum.photos/seed/${Date.now()}/600/600`;
       
       const newPost: Post = {
         id: `temp_${Date.now()}`,
         user_id: currentUser.id,
-        image_url: preview || imageUrl,
+        image_url: preview || fallbackImageUrl,
         caption: caption,
         created_at: new Date().toISOString(),
         profiles: currentUser,
@@ -104,11 +97,25 @@ export const Feed: React.FC = () => {
         comments_count: 0
       };
       setPosts(prev => [newPost, ...prev]);
+
+      let imageUrl = '';
+      if (file) {
+         imageUrl = await api.uploadFile(file);
+      } else {
+         imageUrl = fallbackImageUrl; 
+      }
+
+      const realPost = await api.createPost(imageUrl, caption, currentUser.id, currentUser.username);
+      
+      setPosts(prev => prev.map(p => p.id === newPost.id ? realPost : p));
+      
       setCaption('');
       setFile(null);
       setPreview(null);
     } catch (e) {
       console.error(e);
+      // Remove optimistic post on error
+      setPosts(prev => prev.filter(p => !p.id.startsWith('temp_')));
     } finally {
       setIsPosting(false);
     }

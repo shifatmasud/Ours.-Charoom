@@ -1,6 +1,6 @@
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { supabase } from '../services/supabaseClient';
+import { api, supabase } from '../services/supabaseClient';
 import { Notification } from '../types';
 import { useAuth } from './AuthContext';
 
@@ -31,22 +31,9 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const fetchNotifications = async () => {
     if (!user) return;
     try {
-      const { data, error } = await supabase
-        .from('notifications')
-        .select('*, sender_profile:profiles!sender_id(*), receiver_profile:profiles!user_id(*)')
-        .order('created_at', { ascending: false })
-        .limit(50);
-      
-      if (error) throw error;
-      
-      const notifs = (data || []).map((n: any) => ({
-        ...n,
-        sender_profile: Array.isArray(n.sender_profile) ? n.sender_profile[0] : n.sender_profile,
-        receiver_profile: Array.isArray(n.receiver_profile) ? n.receiver_profile[0] : n.receiver_profile
-      }));
-      
+      const notifs = await api.getNotifications(user.id);
       setNotifications(notifs);
-      setUnreadCount(notifs.filter(n => !n.is_read).length);
+      setUnreadCount(notifs.filter(n => !n.is_read && n.user_id === user.id).length);
     } catch (e) {
       console.error("NotificationContext: Failed to fetch notifications", e);
     }
@@ -54,9 +41,14 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   const markAsRead = async (id: string) => {
     try {
-      setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
-      setUnreadCount(prev => Math.max(0, prev - 1));
-      await supabase.from('notifications').update({ is_read: true }).eq('id', id);
+      setNotifications(prev => {
+        const notif = prev.find(n => n.id === id);
+        if (notif && !notif.is_read && notif.user_id === user?.id) {
+            setUnreadCount(c => Math.max(0, c - 1));
+        }
+        return prev.map(n => n.id === id ? { ...n, is_read: true } : n);
+      });
+      await api.markNotificationAsRead(id);
     } catch (e) {
       console.error("NotificationContext: Failed to mark as read", e);
     }
@@ -80,24 +72,28 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         const data = payload.payload;
         if (!data) return;
         
-        // Skip own actions
-        if (data.sender_id === user.id) return;
+        // We want to show all activities in the global feed
+        // if (data.sender_id === user.id) return;
 
         setLastActivity(data);
-        // Prepend to list if it's for us
-        if (data.user_id === user.id) {
-            setNotifications(prev => {
-                if (prev.some(n => n.id === data.id)) return prev;
-                return [data, ...prev].slice(0, 50);
-            });
-            setUnreadCount(prev => prev + 1);
-        }
+        
+        // Add to global feed and increment unread count only if it's new
+        setNotifications(prev => {
+            if (prev.some(n => n.id === data.id)) return prev;
+            
+            // Only increment unread count if it's for us and it's new
+            if (data.user_id === user.id && data.sender_id !== user.id) {
+                setUnreadCount(c => c + 1);
+            }
+            
+            return [data, ...prev].slice(0, 50);
+        });
       })
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications' }, async (payload) => {
         console.log("NotificationContext: DB notification received", payload);
         
-        // Skip own actions
-        if (payload.new.sender_id === user.id) return;
+        // We want to show all activities in the global feed
+        // if (payload.new.sender_id === user.id) return;
 
         // Fetch full notification with profiles
         try {
@@ -116,14 +112,18 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
             };
             
             setLastActivity(formattedNotif);
-            if (formattedNotif.user_id === user.id) {
-                setNotifications(prev => {
-                    // Avoid duplicates if broadcast already added it
-                    if (prev.some(n => n.id === formattedNotif.id)) return prev;
-                    return [formattedNotif, ...prev].slice(0, 50);
-                });
-                setUnreadCount(prev => prev + 1);
-            }
+            
+            // Add to global feed and increment unread count only if it's new
+            setNotifications(prev => {
+                if (prev.some(n => n.id === formattedNotif.id)) return prev;
+                
+                // Only increment unread count if it's for us and it's new
+                if (formattedNotif.user_id === user.id && formattedNotif.sender_id !== user.id) {
+                    setUnreadCount(c => c + 1);
+                }
+                
+                return [formattedNotif, ...prev].slice(0, 50);
+            });
           }
         } catch (e) {
           console.error("NotificationContext: Failed to fetch notification details", e);

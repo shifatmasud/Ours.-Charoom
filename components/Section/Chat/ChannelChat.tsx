@@ -34,9 +34,9 @@ export const ChannelChat: React.FC = () => {
             if (ignore) return;
             setMessages(msgs);
 
-            channel = supabase.channel('codex_chat_v3')
-               .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: 'receiver_id=eq.codex' }, payload => {
-                  const newMsg = parseMessageContent(payload.new);
+            channel = supabase.channel('public-codex-chat')
+               .on('broadcast', { event: 'new_message' }, payload => {
+                  const newMsg = parseMessageContent(payload.payload);
                   
                   // Only add messages from other users. My own messages are added optimistically.
                   if (newMsg.sender_id === currentUser.id) {
@@ -74,13 +74,21 @@ export const ChannelChat: React.FC = () => {
         setMessages(prev => [...prev, optimisticMsg]);
 
         try {
-            await api.sendMessage(currentUser.id, 'codex', content, type, mediaUrl);
+            const realMsg = await api.sendMessage(currentUser.id, 'codex', content, type, mediaUrl, currentUser.username);
+            setMessages(prev => prev.map(m => m.id === tempId ? realMsg : m));
         } catch (e) {
             console.error("Failed to send to Codex", e);
+            setMessages(prev => prev.filter(m => m.id !== tempId));
         }
     };
 
-    const startCall = () => {
+    const startCall = async () => {
+        if (!currentUser) return;
+        try {
+            await api.sendNotification('codex', currentUser.id, 'call', 'codex-global', undefined, currentUser.username);
+        } catch (e) {
+            console.error("Failed to send call notification", e);
+        }
         navigate(`/call/codex-global`);
     };
 

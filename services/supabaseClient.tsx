@@ -55,10 +55,13 @@ const MOCK_POSTS: Post[] = [
 
 // Helper to handle "Failed to fetch" errors consistently
 const isConnectionError = (err: any) => {
-  return err.message === 'Failed to fetch' || 
-         (err.name === 'TypeError' && err.message.includes('fetch')) ||
-         (err.message && err.message.toLowerCase().includes('failed to fetch')) ||
-         err.message === 'timeout';
+  if (!err) return false;
+  const msg = (err.message || String(err)).toLowerCase();
+  return msg.includes('failed to fetch') || 
+         msg.includes('network error') ||
+         msg.includes('load failed') ||
+         msg.includes('timeout') ||
+         err.name === 'TypeError' && msg.includes('fetch');
 };
 
 const handleSupabaseError = (err: any) => {
@@ -71,7 +74,9 @@ const handleSupabaseError = (err: any) => {
         throw error;
     }
     const msg = 'Unable to connect to your Supabase project. Please check if your VITE_SUPABASE_URL is correct and the project is active.';
-    throw new Error(msg);
+    const error = new Error(msg) as any;
+    error.isConnectionError = true;
+    throw error;
   }
   throw err;
 };
@@ -121,7 +126,50 @@ export const parseMessageContent = (msg: any): Message => {
 // --- API Implementation ---
 
 export const api = {
-  sendNotification: async (userId: string, senderId: string, type: 'like' | 'comment' | 'follow', referenceId: string, mediaUrl?: string, senderUsername?: string): Promise<void> => {
+  getNotifications: async (userId: string): Promise<Notification[]> => {
+    try {
+      const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 8000));
+      const { data, error } = await Promise.race([
+        supabase
+          .from('notifications')
+          .select('*, sender_profile:profiles!sender_id(*), receiver_profile:profiles!user_id(*)')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(50),
+        timeout
+      ]) as any;
+      
+      if (error) throw error;
+      
+      return (data || []).map((n: any) => ({
+        ...n,
+        sender_profile: Array.isArray(n.sender_profile) ? n.sender_profile[0] : n.sender_profile,
+        receiver_profile: Array.isArray(n.receiver_profile) ? n.receiver_profile[0] : n.receiver_profile
+      }));
+    } catch (err: any) {
+      if (err.message === 'timeout') {
+          console.warn('Notifications fetch timed out');
+          return [];
+      }
+      if (isConnectionError(err) && isDefaultUrl) {
+          return [];
+      }
+      handleSupabaseError(err);
+      return [];
+    }
+  },
+
+  markNotificationAsRead: async (id: string): Promise<void> => {
+    try {
+      const { error } = await supabase.from('notifications').update({ is_read: true }).eq('id', id);
+      if (error) throw error;
+    } catch (err: any) {
+      if (isConnectionError(err) && isDefaultUrl) return;
+      handleSupabaseError(err);
+    }
+  },
+
+  sendNotification: async (userId: string, senderId: string, type: string, referenceId: string, mediaUrl?: string, senderUsername?: string): Promise<void> => {
       try {
           // Try Edge Function first
           const response = await fetch(`${SUPABASE_URL}/functions/v1/send-notification`, {
@@ -255,9 +303,14 @@ export const api = {
                 // If on default URL and unreachable, show mock user
                 if (isDefaultUrl) {
                     try {
-                        // Quick check if reachable
-                        await supabase.from('profiles').select('id').limit(1);
+                        // Quick check if reachable with timeout
+                        const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000));
+                        await Promise.race([
+                            supabase.from('profiles').select('id').limit(1),
+                            timeout
+                        ]);
                     } catch (e) {
+                        console.warn('Auth: Default Supabase project unreachable, using mock user');
                         return MOCK_USER;
                     }
                 }
@@ -275,13 +328,15 @@ export const api = {
                     timeout
                 ]) as any;
                 if (error) {
-                    console.error('Error fetching profile:', error);
+                    if (!isConnectionError(error) || !isDefaultUrl) {
+                        console.error('Error fetching profile:', error);
+                    }
                     handleSupabaseError(error);
                 }
                 return data;
             } catch (e) {
-                if (e instanceof Error && e.message === 'timeout') {
-                    console.warn('Profile fetch timed out, using fallback');
+                if (e instanceof Error && (e.message === 'timeout' || (e as any).isDefaultUrlError)) {
+                    if (!isDefaultUrl) console.warn('Profile fetch timed out, using fallback');
                     return null;
                 }
                 throw e;
@@ -374,7 +429,11 @@ export const api = {
     }
     
     try {
-        const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
+        const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000));
+        const { data, error } = await Promise.race([
+            supabase.from('profiles').select('*').eq('id', userId).single(),
+            timeout
+        ]) as any;
         
         if (error) {
             if ((IS_MOCK_MODE || isDefaultUrl) && (error.message?.includes('Failed to fetch') || error.code === 'PGRST116')) {
@@ -386,7 +445,8 @@ export const api = {
         // Fetch real-time counts from the source of truth
         const fetchCount = async (query: any) => {
             try {
-                const { count, error } = await query;
+                const countTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000));
+                const { count, error } = await Promise.race([query, countTimeout]) as any;
                 if (error) return 0;
                 return count || 0;
             } catch (e) {
@@ -567,8 +627,21 @@ export const api = {
     }
   },
 
-  createPost: async (imageUrl: string, caption: string, userId: string): Promise<void> => {
-    await supabase.from('posts').insert({ user_id: userId, image_url: imageUrl, caption });
+  createPost: async (imageUrl: string, caption: string, userId: string, senderUsername?: string): Promise<Post> => {
+    const { data, error } = await supabase.from('posts').insert({ user_id: userId, image_url: imageUrl, caption }).select('*, profiles:user_id(*)').single();
+    if (error) throw error;
+    
+    // Broadcast post creation
+    if (data) {
+        await api.sendNotification(userId, userId, 'post', data.id, imageUrl, senderUsername);
+    }
+    
+    return {
+        ...data,
+        likes_count: 0,
+        comments_count: 0,
+        has_liked: false
+    };
   },
 
   deletePost: async (postId: string): Promise<void> => {
@@ -583,10 +656,8 @@ export const api = {
         await supabase.from('likes').delete().eq('id', data.id);
     } else {
         await supabase.from('likes').insert({ user_id: userId, post_id: postId });
-        // Trigger notification if not self-like
-        if (userId !== ownerId) {
-            await api.sendNotification(ownerId, userId, 'like', postId, mediaUrl, senderUsername);
-        }
+        // Trigger notification for all likes (even self-likes) to show in global feed
+        await api.sendNotification(ownerId, userId, 'like', postId, mediaUrl, senderUsername);
     }
   },
 
@@ -603,10 +674,8 @@ export const api = {
     const { data, error } = await supabase.from('comments').insert({ post_id: postId, user_id: userId, content }).select('*, profile:user_id(*)').single();
     if (error) throw error;
     
-    // Trigger notification if not self-comment
-    if (userId !== ownerId) {
-        await api.sendNotification(ownerId, userId, 'comment', postId, mediaUrl, senderUsername);
-    }
+    // Trigger notification for all comments (even self-comments) to show in global feed
+    await api.sendNotification(ownerId, userId, 'comment', postId, mediaUrl, senderUsername);
     
     return data;
   },
@@ -680,7 +749,7 @@ export const api = {
       return latestMessages;
   },
 
-  sendMessage: async (senderId: string, receiverId: string, content: string, type: 'text' | 'image' | 'audio' = 'text', mediaUrl?: string): Promise<void> => {
+  sendMessage: async (senderId: string, receiverId: string, content: string, type: 'text' | 'image' | 'audio' = 'text', mediaUrl?: string, senderUsername?: string): Promise<Message> => {
       // Pack rich data into 'content' if it's not plain text, to support restricted schema
       let finalContent = content;
       if (type !== 'text' || mediaUrl) {
@@ -691,13 +760,34 @@ export const api = {
           });
       }
 
-      const { error } = await supabase.from('messages').insert({ 
+      const { data, error } = await supabase.from('messages').insert({ 
           sender_id: senderId, 
           receiver_id: receiverId, 
           content: finalContent 
-      });
+      }).select().single();
       
       if (error) throw error;
+
+      if (data) {
+          // Broadcast the message to the specific chat channel
+          const channelName = receiverId === 'codex' ? 'public-codex-chat' : `dm-${[senderId, receiverId].sort().join('-')}`;
+          const channel = supabase.channel(channelName);
+          channel.subscribe((status) => {
+              if (status === 'SUBSCRIBED') {
+                  channel.send({
+                      type: 'broadcast',
+                      event: 'new_message',
+                      payload: data
+                  }).then(() => {
+                      supabase.removeChannel(channel);
+                  });
+              }
+          });
+
+          await api.sendNotification(receiverId, senderId, 'message', data.id, mediaUrl, senderUsername);
+      }
+      
+      return parseMessageContent(data);
   },
 
   // --- Storage ---
@@ -713,41 +803,5 @@ export const api = {
       } catch (err: any) {
           handleSupabaseError(err);
       }
-  },
-
-  // --- Notifications ---
-  getNotifications: async (): Promise<Notification[]> => {
-      try {
-          const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 8000));
-          const { data, error } = await Promise.race([
-              supabase.from('notifications')
-                .select('*, sender_profile:profiles!sender_id(*), receiver_profile:profiles!user_id(*)')
-                .order('created_at', { ascending: false })
-                .limit(100),
-              timeout
-          ]) as any;
-          
-          if (error) {
-              console.error('Error fetching notifications:', error);
-              handleSupabaseError(error);
-          }
-          
-          return (data || []).map((n: any) => ({
-              ...n,
-              sender_profile: Array.isArray(n.sender_profile) ? n.sender_profile[0] : n.sender_profile,
-              receiver_profile: Array.isArray(n.receiver_profile) ? n.receiver_profile[0] : n.receiver_profile
-          }));
-      } catch (e: any) {
-          if (e instanceof Error && e.message === 'timeout') {
-              console.warn('Notifications fetch timed out');
-              return [];
-          }
-          console.error('getNotifications failed:', e);
-          return [];
-      }
-  },
-
-  markNotificationRead: async (notifId: string) => {
-      await supabase.from('notifications').update({ is_read: true }).eq('id', notifId);
   }
 };

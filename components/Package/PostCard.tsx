@@ -8,7 +8,7 @@ import { ParticleBurst } from '../Core/ParticleBurst';
 import { SlotCounter } from '../Core/SlotCounter';
 import { Post, CurrentUser, Comment } from '../../types';
 import { api } from '../../services/supabaseClient';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { DS } from '../../Theme';
 import { formatDistanceToNow } from 'date-fns';
 import { Lightbox } from '../Core/Lightbox';
@@ -17,13 +17,14 @@ import { useModal } from '../../contexts/ModalContext';
 
 interface PostCardProps {
   post: Post;
-  currentUser: CurrentUser;
+  currentUser?: CurrentUser;
 }
 
 const LIKE_COLOR = '#FF4F1F'; // Reddish Orange (Accent)
 
 export const PostCard: React.FC<PostCardProps> = ({ post, currentUser }) => {
   const { showAlert, showConfirm } = useModal();
+  const navigate = useNavigate();
   const [isLiked, setIsLiked] = useState(post.has_liked);
   const [likesCount, setLikesCount] = useState(post.likes_count || 0);
   const [showHeartOverlay, setShowHeartOverlay] = useState(false);
@@ -37,7 +38,7 @@ export const PostCard: React.FC<PostCardProps> = ({ post, currentUser }) => {
   const [isDeleted, setIsDeleted] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
 
-  const canDelete = currentUser?.is_admin || currentUser?.id === post.user_id;
+  const canDelete = currentUser?.is_admin || (currentUser && currentUser.id === post.user_id);
 
   // Calculate relative time
   let timeAgo = 'NOW';
@@ -55,12 +56,20 @@ export const PostCard: React.FC<PostCardProps> = ({ post, currentUser }) => {
   };
 
   const handleDoubleTap = () => {
+    if (!currentUser) {
+        navigate('/login');
+        return;
+    }
     if (!isLiked) toggleLike();
     setShowHeartOverlay(true);
     setTimeout(() => setShowHeartOverlay(false), 800);
   };
 
   const toggleLike = async () => {
+    if (!currentUser) {
+        navigate('/login');
+        return;
+    }
     const newLikedState = !isLiked;
     setIsLiked(newLikedState);
     setLikesCount(prev => newLikedState ? prev + 1 : prev - 1);
@@ -88,14 +97,31 @@ export const PostCard: React.FC<PostCardProps> = ({ post, currentUser }) => {
   };
 
   const handleAddComment = async () => {
+    if (!currentUser) {
+        navigate('/login');
+        return;
+    }
     if (!newComment.trim()) return;
     const text = newComment;
     setNewComment('');
+    
+    // Optimistic render
+    const tempComment: Comment = {
+      id: `temp-${Date.now()}`,
+      post_id: post.id,
+      user_id: currentUser.id,
+      content: text,
+      created_at: new Date().toISOString(),
+      profile: { id: currentUser.id, username: currentUser.username, avatar_url: currentUser.avatar_url }
+    };
+    setComments(prev => [...prev, tempComment]);
+    
     try {
       const savedComment = await api.addComment(post.id, currentUser.id, text, post.user_id, currentUser.username, post.image_url);
-      setComments(prev => [...prev, savedComment]);
+      setComments(prev => prev.map(c => c.id === tempComment.id ? savedComment : c));
     } catch (e) {
       console.error("Failed to comment", e);
+      setComments(prev => prev.filter(c => c.id !== tempComment.id));
     }
   };
 

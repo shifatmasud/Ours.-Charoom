@@ -36,12 +36,14 @@ export const Activity: React.FC = () => {
   }, [notifications, loading]);
 
   const handleInteraction = async (n: Notification) => {
-      if (!n.is_read) {
+      if (!n.is_read && n.user_id === user?.id) {
           await markAsRead(n.id);
       }
 
       if (n.type === 'follow') {
            navigate(`/profile/${n.sender_profile?.id}`);
+      } else if (n.type === 'message' || n.type === 'call') {
+           navigate(`/messages/${n.sender_profile?.id}`);
       } else {
            navigate(`/post/${n.reference_id}`);
       }
@@ -52,6 +54,9 @@ export const Activity: React.FC = () => {
           case 'like': return <Heart weight="fill" color={DS.Color.Status.Error} size={12} />;
           case 'comment': return <ChatCircle weight="fill" color={DS.Color.Accent.Surface} size={12} />;
           case 'follow': return <UserPlus weight="fill" color="#22c55e" size={12} />;
+          case 'message': return <ChatCircle weight="fill" color="#3b82f6" size={12} />;
+          case 'post': return <Bell weight="fill" color="#8b5cf6" size={12} />;
+          case 'call': return <Bell weight="fill" color="#f59e0b" size={12} />;
           default: return <Bell weight="fill" color={DS.Color.Base.Content[3]} size={12} />;
       }
   };
@@ -61,6 +66,9 @@ export const Activity: React.FC = () => {
           case 'like': return 'rgba(255, 51, 51, 0.1)';
           case 'comment': return 'rgba(255, 79, 31, 0.1)';
           case 'follow': return 'rgba(34, 197, 94, 0.1)';
+          case 'message': return 'rgba(59, 130, 246, 0.1)';
+          case 'post': return 'rgba(139, 92, 246, 0.1)';
+          case 'call': return 'rgba(245, 158, 11, 0.1)';
           default: return DS.Color.Base.Surface[2];
       }
   };
@@ -76,7 +84,7 @@ export const Activity: React.FC = () => {
             {/* Header */}
             <div style={{ 
                 padding: '24px 24px 16px 24px', 
-                position: 'sticky', top: 0, zIndex: 50,
+                position: 'sticky', top: 0, zIndex: 100,
                 background: `linear-gradient(to bottom, ${DS.Color.Base.Surface[1]} 80%, transparent 100%)`,
                 backdropFilter: 'blur(12px)',
                 WebkitBackdropFilter: 'blur(12px)',
@@ -84,8 +92,24 @@ export const Activity: React.FC = () => {
             }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
                     <button 
-                        onClick={() => navigate(-1)}
-                        style={{ background: 'none', border: 'none', color: theme.colors.text1, cursor: 'pointer', display: 'flex' }}
+                        onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            navigate(-1);
+                        }}
+                        style={{ 
+                            background: DS.Color.Base.Surface[2], 
+                            border: `1px solid ${DS.Color.Base.Border}`, 
+                            color: theme.colors.text1, 
+                            cursor: 'pointer', 
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            width: '40px',
+                            height: '40px',
+                            borderRadius: '50%',
+                            zIndex: 101
+                        }}
                     >
                         <CaretLeft size={24} />
                     </button>
@@ -187,7 +211,7 @@ const NotificationItem: React.FC<NotificationItemProps> = ({ notification, index
             .replace('less than a minute', 'just now');
     } catch (e) {}
 
-    const isUnread = !notification.is_read;
+    const isUnread = !notification.is_read && notification.user_id === currentUser?.id;
 
     return (
         <motion.div
@@ -246,41 +270,52 @@ const NotificationItem: React.FC<NotificationItemProps> = ({ notification, index
                          {notification.type === 'follow' && (
                              <>started following <span style={{ fontWeight: 600 }}>{notification.user_id === currentUser?.id ? 'you' : notification.receiver_profile?.username}</span>.</>
                          )}
+                         {notification.type === 'message' && (
+                             <>sent a message to <span style={{ fontWeight: 600 }}>{notification.user_id === currentUser?.id ? 'you' : (notification.receiver_profile?.username || 'codex')}</span>.</>
+                         )}
+                         {notification.type === 'post' && (
+                             <>shared a new moment.</>
+                         )}
+                         {notification.type === 'call' && (
+                             <>started a call with <span style={{ fontWeight: 600 }}>{notification.user_id === currentUser?.id ? 'you' : (notification.receiver_profile?.username || 'codex')}</span>.</>
+                         )}
                      </span>
                  </p>
                  <span style={{ fontSize: '12px', color: theme.colors.text3, fontWeight: 500 }}>{timeLabel}</span>
              </div>
 
              {/* Right Side Interaction */}
-             {notification.type === 'follow' ? (
-                 <button style={{
-                     padding: '6px 14px',
-                     borderRadius: DS.Radius.Full,
-                     background: DS.Color.Base.Surface[3],
-                     color: theme.colors.text1,
-                     fontSize: '12px',
-                     fontWeight: 600,
-                     border: `1px solid ${DS.Color.Base.Border}`,
-                     cursor: 'pointer',
-                     whiteSpace: 'nowrap'
-                 }}>
-                     View
-                 </button>
-             ) : (
+             {notification.media_url ? (
                 <div style={{
-                    width: '40px', height: '40px',
-                    borderRadius: DS.Radius.M,
+                    width: '44px', height: '44px',
+                    borderRadius: DS.Radius.S,
                     overflow: 'hidden',
                     flexShrink: 0,
                     background: DS.Color.Base.Surface[3],
                     border: `1px solid ${DS.Color.Base.Border}`
                 }}>
                     <img 
-                        src={notification.media_url || `https://picsum.photos/seed/${notification.reference_id}/100/100`} 
-                        alt="ref" 
+                        src={notification.media_url} 
+                        alt="context" 
                         style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
                     />
                 </div>
+             ) : (
+                (notification.type === 'follow' || notification.type === 'message' || notification.type === 'call') && (
+                    <button style={{
+                        padding: '6px 14px',
+                        borderRadius: DS.Radius.Full,
+                        background: DS.Color.Base.Surface[3],
+                        color: theme.colors.text1,
+                        fontSize: '12px',
+                        fontWeight: 600,
+                        border: `1px solid ${DS.Color.Base.Border}`,
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap'
+                    }}>
+                        View
+                    </button>
+                )
              )}
              
              {/* Unread Dot */}

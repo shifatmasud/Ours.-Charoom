@@ -50,7 +50,7 @@ export interface Notification {
   id: string;
   user_id: string;
   sender_id: string;
-  type: 'like' | 'comment' | 'follow';
+  type: 'like' | 'comment' | 'follow' | 'message' | 'post' | 'call';
   reference_id: string;
   is_read: boolean;
   created_at: string;

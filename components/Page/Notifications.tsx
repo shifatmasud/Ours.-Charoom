@@ -3,21 +3,26 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { api } from '../../services/supabaseClient';
 import { Notification } from '../../types';
 import { DS } from '../../Theme';
-import { Check, Heart, ChatCircle, UserPlus, X } from '@phosphor-icons/react';
+import { Check, Heart, ChatCircle, UserPlus } from '@phosphor-icons/react';
 import { Link } from 'react-router-dom';
+import { useAuth } from '../../contexts/AuthContext';
 
 export const NotificationsPage: React.FC = () => {
+  const { user } = useAuth();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchNotifications();
-  }, []);
+    if (user) {
+      fetchNotifications();
+    }
+  }, [user?.id]);
 
   const fetchNotifications = async () => {
+    if (!user) return;
     setLoading(true);
     try {
-      const data = await api.getNotifications();
+      const data = await api.getNotifications(user.id);
       setNotifications(data);
     } catch (e) {
       console.error("Failed to fetch notifications", e);
@@ -28,7 +33,7 @@ export const NotificationsPage: React.FC = () => {
 
   const markAsRead = async (notifId: string) => {
     try {
-      await api.markNotificationRead(notifId);
+      await api.markNotificationAsRead(notifId);
       setNotifications(prev => prev.map(n => n.id === notifId ? { ...n, is_read: true } : n));
     } catch (e) {
       console.error("Failed to mark notification read", e);

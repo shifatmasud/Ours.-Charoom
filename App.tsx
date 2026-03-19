@@ -17,7 +17,8 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { NotificationProvider, useNotifications } from './contexts/NotificationContext';
 import { ModalProvider } from './contexts/ModalContext';
 import { Loader } from './components/Core/Loader';
-import { api, supabase } from './services/supabaseClient';
+import ReactDOM from 'react-dom';
+import { Post, CurrentUser, Notification } from './types';
 import { DS } from './Theme';
 
 // --- Auth Guard ---
@@ -48,10 +49,11 @@ const AnimatedRoutes = () => {
         style={{ width: '100%', height: '100%' }}
       >
         <Routes location={location}>
+          {/* Public Routes */}
+          <Route path="/" element={<Feed />} />
           <Route path="/login" element={<Login />} />
           
           {/* Protected Routes */}
-          <Route path="/" element={<RequireAuth><Feed /></RequireAuth>} />
           <Route path="/profile/:userId" element={<RequireAuth><Profile /></RequireAuth>} />
           <Route path="/post/:postId" element={<RequireAuth><PostDetail /></RequireAuth>} />
           <Route path="/messages" element={<RequireAuth><MessagesList /></RequireAuth>} />
@@ -66,62 +68,98 @@ const AnimatedRoutes = () => {
 const NotificationContainer = () => {
     const { user } = useAuth();
     const { lastActivity } = useNotifications();
-    const [toast, setToast] = useState<{ message: string, visible: boolean } | null>(null);
+    const [toast, setToast] = useState<{ message: string, visible: boolean, icon?: React.ReactNode, mediaUrl?: string } | null>(null);
 
     useEffect(() => {
-        if (!lastActivity || !user) return;
+        if (!lastActivity) return;
         
-        const { type, sender_profile, receiver_profile, user_id, sender_id } = lastActivity;
+        const { type, sender_profile, receiver_profile, user_id, sender_id, media_url } = lastActivity;
         
         // Skip toast for own actions to avoid self-spam
-        if (sender_id === user.id) return;
+        if (user && sender_id === user.id) return;
 
         const senderName = sender_profile?.username || 'Someone';
-        const receiverName = user_id === user.id ? 'your' : `${receiver_profile?.username || 'someone'}'s`;
-        const receiverNameFollow = user_id === user.id ? 'you' : (receiver_profile?.username || 'someone');
+        const receiverName = user && user_id === user.id ? 'your' : `${receiver_profile?.username || 'someone'}'s`;
+        const receiverNameFollow = user && user_id === user.id ? 'you' : (receiver_profile?.username || 'someone');
 
         let msg = "";
-        if(type === 'like') msg = `${senderName} liked ${receiverName} moment`;
-        if(type === 'comment') msg = `${senderName} commented on ${receiverName} moment`;
-        if(type === 'follow') msg = `${senderName} started following ${receiverNameFollow}`;
+        let icon = null;
+        
+        if(type === 'like') {
+            msg = `${senderName} liked ${receiverName} moment`;
+        }
+        if(type === 'comment') {
+            msg = `${senderName} commented on ${receiverName} moment`;
+        }
+        if(type === 'follow') {
+            msg = `${senderName} started following ${receiverNameFollow}`;
+        }
+        if(type === 'message') {
+            msg = `${senderName} sent a message`;
+        }
+        if(type === 'post') {
+            msg = `${senderName} shared a new moment`;
+        }
+        if(type === 'call') {
+            msg = `${senderName} started a call`;
+        }
         
         if (msg) {
-            console.log("App: Showing toast:", msg);
-            setToast({ message: msg, visible: true });
+            setToast({ message: msg, visible: true, mediaUrl: media_url });
         }
     }, [lastActivity?.id, user?.id]);
 
-    // Auto-hide toast logic
     useEffect(() => {
         if (toast?.visible) {
             const timer = setTimeout(() => {
                 setToast(prev => prev ? { ...prev, visible: false } : null);
-                // Completely clear after exit animation
                 setTimeout(() => setToast(null), 500);
             }, 4000);
             return () => clearTimeout(timer);
         }
     }, [toast?.message, toast?.visible]);
 
-    return (
+    if (!toast) return null;
+
+    return ReactDOM.createPortal(
         <AnimatePresence>
-            {toast && (
+            {toast.visible && (
                 <motion.div 
-                    initial={{ opacity: 0, y: -20, x: '-50%' }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -20 }}
+                    initial={{ opacity: 0, y: -100, x: '-50%', scale: 0.9 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -100, scale: 0.9 }}
+                    transition={DS.Motion.Spring.Gentle}
                     style={{ 
-                        position: 'fixed', top: '24px', left: '50%', transform: 'translateX(-50%)', 
-                        background: DS.Color.Accent.Surface, color: 'white', padding: '12px 24px', 
-                        borderRadius: DS.Radius.Full, boxShadow: DS.Effect.Shadow.Soft, zIndex: 9999,
-                        fontWeight: 600, fontSize: '14px'
+                        position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%)', 
+                        background: DS.Color.Base.Surface[2], 
+                        color: DS.Color.Base.Content[1], 
+                        padding: '8px 8px 8px 16px', 
+                        borderRadius: DS.Radius.Full, 
+                        boxShadow: '0 20px 40px rgba(0,0,0,0.2)', 
+                        zIndex: 100000,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '12px',
+                        border: `1px solid ${DS.Color.Base.Border}`,
+                        minWidth: '280px',
+                        maxWidth: '90vw',
+                        backdropFilter: 'blur(12px)',
+                        WebkitBackdropFilter: 'blur(12px)'
                     }}
                 >
-                    {toast.message}
+                    <div style={{ flex: 1, fontSize: '13px', fontWeight: 600, letterSpacing: '-0.01em' }}>
+                        {toast.message}
+                    </div>
+                    {toast.mediaUrl && (
+                        <div style={{ width: '36px', height: '36px', borderRadius: DS.Radius.Full, overflow: 'hidden', flexShrink: 0, border: `1px solid ${DS.Color.Base.Border}` }}>
+                            <img src={toast.mediaUrl} alt="context" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        </div>
+                    )}
                 </motion.div>
             )}
-        </AnimatePresence>
-    )
+        </AnimatePresence>,
+        document.body
+    );
 }
 
 const ConnectionErrorBanner = () => {

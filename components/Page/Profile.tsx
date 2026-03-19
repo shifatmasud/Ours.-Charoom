@@ -116,16 +116,29 @@ export const Profile: React.FC = () => {
 
   const handleFollowToggle = async () => {
     if (!currentUser || !profileUser) return;
+    const wasFollowing = profileUser.is_following;
+    
+    // Optimistic render
+    setProfileUser(prev => prev ? ({ 
+      ...prev, 
+      is_following: !wasFollowing, 
+      followers_count: (prev.followers_count || 0) + (wasFollowing ? -1 : 1) 
+    }) : null);
+
     try {
-      if (profileUser.is_following) {
+      if (wasFollowing) {
         await api.unfollowUser(currentUser.id, profileUser.id);
-        setProfileUser(prev => prev ? ({ ...prev, is_following: false, followers_count: (prev.followers_count || 1) - 1 }) : null);
       } else {
         await api.followUser(currentUser.id, profileUser.id, currentUser.username);
-        setProfileUser(prev => prev ? ({ ...prev, is_following: true, followers_count: (prev.followers_count || 0) + 1 }) : null);
       }
     } catch (e) {
       console.error(e);
+      // Revert optimistic render
+      setProfileUser(prev => prev ? ({ 
+        ...prev, 
+        is_following: wasFollowing, 
+        followers_count: (prev.followers_count || 0) + (wasFollowing ? 1 : -1) 
+      }) : null);
     }
   };
 

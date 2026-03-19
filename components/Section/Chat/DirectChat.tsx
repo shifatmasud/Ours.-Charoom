@@ -49,10 +49,11 @@ export const DirectChat: React.FC<DirectChatProps> = ({ friendId }) => {
             if (ignore) return;
             setFriendProfile(friend);
 
-            // Subscribe to DM updates
-            channel = supabase.channel(`dm:${currentUser.id}:${friendId}`)
-               .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, payload => {
-                   const msgRaw = payload.new;
+            // Subscribe to DM updates via broadcast
+            const channelName = `dm-${[currentUser.id, friendId].sort().join('-')}`;
+            channel = supabase.channel(channelName)
+               .on('broadcast', { event: 'new_message' }, payload => {
+                   const msgRaw = payload.payload;
                    const msg = parseMessageContent(msgRaw);
                    
                    // Only add incoming messages from the friend. My own messages are added optimistically.
@@ -94,16 +95,25 @@ export const DirectChat: React.FC<DirectChatProps> = ({ friendId }) => {
 
         try {
             console.log("Calling api.sendMessage");
-            await api.sendMessage(currentUser.id, friendId, content, type, mediaUrl);
+            const realMsg = await api.sendMessage(currentUser.id, friendId, content, type, mediaUrl, currentUser.username);
             console.log("api.sendMessage success");
+            setMessages(prev => prev.map(m => m.id === tempId ? realMsg : m));
         } catch (e) {
             console.error("Send failed", e);
+            setMessages(prev => prev.filter(m => m.id !== tempId));
         }
     };
 
-    const startCall = () => {
+    const startCall = async () => {
         if (!currentUser) return;
         const roomId = [currentUser.id, friendId].sort().join('-');
+        
+        try {
+            await api.sendNotification(friendId, currentUser.id, 'call', roomId, undefined, currentUser.username);
+        } catch (e) {
+            console.error("Failed to send call notification", e);
+        }
+        
         navigate(`/call/${roomId}`);
     };
 

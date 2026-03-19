@@ -41,6 +41,9 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   const markAsRead = async (id: string) => {
     try {
+      const notifToMark = notifications.find(n => n.id === id);
+      if (!notifToMark || notifToMark.user_id !== user?.id) return;
+
       setNotifications(prev => {
         const notif = prev.find(n => n.id === id);
         if (notif && !notif.is_read && notif.user_id === user?.id) {
@@ -64,30 +67,95 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
     fetchNotifications();
 
-    console.log("NotificationContext: Subscribing to notifications for user", user.id);
+    console.log("NotificationContext: Subscribing to global_activities for user", user.id);
     
-    const channel = api.subscribeToNotifications(user.id, (formattedNotif) => {
-        console.log("NotificationContext: Real-time notification received", formattedNotif);
+    const channel = supabase.channel('global_activities')
+      .on('broadcast', { event: 'activity' }, (payload) => {
+        console.log("NotificationContext: Broadcast activity received", payload);
+        const data = payload.payload;
+        if (!data) {
+            console.warn("NotificationContext: Received empty broadcast payload");
+            return;
+        }
+        
+        // Instant update for the toast/activity feed
+        console.log("NotificationContext: Setting lastActivity", data.id);
+        setLastActivity(data);
         
         setNotifications(prev => {
-            // 1. Check if this exact notification already exists (by real ID)
-            if (prev.some(n => n.id === formattedNotif.id)) return prev;
+            // Avoid duplicates if we somehow get the same broadcast twice
+            if (prev.some(n => n.id === data.id)) return prev;
             
-            // 2. Update lastActivity to trigger toast
-            setLastActivity(formattedNotif);
-
-            // 3. Only increment unread count if it's for us and it's new
-            if (formattedNotif.user_id === user.id && formattedNotif.sender_id !== user.id) {
+            // Only increment unread count if it's for us and it's new
+            if (data.user_id === user.id && data.sender_id !== user.id) {
                 setUnreadCount(c => c + 1);
             }
             
-            return [formattedNotif, ...prev].slice(0, 50);
+            return [data, ...prev].slice(0, 50);
         });
-    });
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications' }, async (payload) => {
+        console.log("NotificationContext: DB notification received", payload);
+        
+        // Fetch full notification with profiles to ensure we have sender_username etc.
+        try {
+          const { data: notif, error } = await supabase
+            .from('notifications')
+            .select('*, sender_profile:profiles!sender_id(*), receiver_profile:profiles!user_id(*)')
+            .eq('id', payload.new.id)
+            .single();
+
+          if (error) throw error;
+          if (notif) {
+            const formattedNotif = {
+              ...notif,
+              sender_profile: Array.isArray(notif.sender_profile) ? notif.sender_profile[0] : notif.sender_profile,
+              receiver_profile: Array.isArray(notif.receiver_profile) ? notif.receiver_profile[0] : notif.receiver_profile,
+              // Ensure sender_username is available for the UI
+              sender_username: notif.sender_profile?.username || notif.sender_username
+            };
+            
+            setNotifications(prev => {
+                // 1. Check if this exact notification already exists (by real ID)
+                if (prev.some(n => n.id === formattedNotif.id)) return prev;
+                
+                // 2. Check for matching "temp" notification from optimistic broadcast to replace it
+                const tempIndex = prev.findIndex(n => 
+                    n.id.startsWith('temp-') && 
+                    n.sender_id === formattedNotif.sender_id && 
+                    n.type === formattedNotif.type && 
+                    n.reference_id === formattedNotif.reference_id
+                );
+
+                if (tempIndex !== -1) {
+                    const newNotifs = [...prev];
+                    newNotifs[tempIndex] = formattedNotif;
+                    return newNotifs;
+                }
+                
+                // 3. If it's a completely new notification (not broadcasted yet)
+                // Update lastActivity to trigger toast if it wasn't already triggered by broadcast
+                setLastActivity(formattedNotif);
+
+                // Only increment unread count if it's for us and it's new
+                if (formattedNotif.user_id === user.id && formattedNotif.sender_id !== user.id) {
+                    setUnreadCount(c => c + 1);
+                }
+                
+                return [formattedNotif, ...prev].slice(0, 50);
+            });
+          }
+        } catch (e) {
+          console.error("NotificationContext: Failed to fetch notification details", e);
+        }
+      })
+      .subscribe((status) => {
+        console.log("NotificationContext: Subscription status:", status);
+      });
 
     return () => {
       console.log("NotificationContext: Cleaning up subscription");
-      if (channel) supabase.removeChannel(channel);
+      supabase.removeChannel(channel);
     };
   }, [user?.id]);
 

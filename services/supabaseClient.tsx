@@ -9,6 +9,8 @@ const RAW_URL = import.meta.env.VITE_SUPABASE_URL || DEFAULT_URL;
 const SUPABASE_URL = RAW_URL.endsWith('/') ? RAW_URL.slice(0, -1) : RAW_URL;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxlenZla3BmbHFieG9ybmVmYndoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM3MDM1OTEsImV4cCI6MjA3OTI3OTU5MX0._fN9MxAivt_GyYv81lR7VJUShAPnYQ5txynHxwyrftw';
 
+const isDefaultUrl = SUPABASE_URL === DEFAULT_URL;
+
 // Helper to handle "Failed to fetch" errors consistently
 const isConnectionError = (err: any) => {
   if (!err) return false;
@@ -22,7 +24,14 @@ const isConnectionError = (err: any) => {
 
 const handleSupabaseError = (err: any) => {
   if (isConnectionError(err)) {
-    const msg = 'Unable to connect to Supabase. Please check your internet connection and ensure your Supabase project is active.';
+    if (isDefaultUrl) {
+        const msg = 'Unable to connect to the default Supabase project. Please configure your own Supabase project in the Settings menu.';
+        const error = new Error(msg) as any;
+        error.isDefaultUrlError = true;
+        error.silent = true;
+        throw error;
+    }
+    const msg = 'Unable to connect to your Supabase project. Please check if your VITE_SUPABASE_URL is correct and the project is active.';
     const error = new Error(msg) as any;
     error.isConnectionError = true;
     throw error;
@@ -77,12 +86,15 @@ export const parseMessageContent = (msg: any): Message => {
 export const api = {
   getNotifications: async (userId: string): Promise<Notification[]> => {
     try {
-      const { data, error } = await supabase
+      const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 8000));
+      const { data, error } = await Promise.race([
+        supabase
           .from('notifications')
           .select('*, sender_profile:profiles!sender_id(*), receiver_profile:profiles!user_id(*)')
-          .eq('user_id', userId)
           .order('created_at', { ascending: false })
-          .limit(50);
+          .limit(50),
+        timeout
+      ]) as any;
       
       if (error) throw error;
       
@@ -92,40 +104,16 @@ export const api = {
         receiver_profile: Array.isArray(n.receiver_profile) ? n.receiver_profile[0] : n.receiver_profile
       }));
     } catch (err: any) {
+      if (err.message === 'timeout') {
+          console.warn('Notifications fetch timed out');
+          return [];
+      }
+      if (isConnectionError(err) && isDefaultUrl) {
+          return [];
+      }
       handleSupabaseError(err);
       return [];
     }
-  },
-
-  subscribeToNotifications: (userId: string, callback: (notification: Notification) => void) => {
-    return supabase
-      .channel(`notifications:${userId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'notifications',
-          filter: `user_id=eq.${userId}`
-        },
-        async (payload) => {
-          // Fetch the full notification with profiles
-          const { data, error } = await supabase
-            .from('notifications')
-            .select('*, sender_profile:profiles!sender_id(*), receiver_profile:profiles!user_id(*)')
-            .eq('id', payload.new.id)
-            .single();
-          
-          if (!error && data) {
-            callback({
-              ...data,
-              sender_profile: Array.isArray(data.sender_profile) ? data.sender_profile[0] : data.sender_profile,
-              receiver_profile: Array.isArray(data.receiver_profile) ? data.receiver_profile[0] : data.receiver_profile
-            });
-          }
-        }
-      )
-      .subscribe();
   },
 
   markNotificationAsRead: async (id: string): Promise<void> => {
@@ -133,6 +121,7 @@ export const api = {
       const { error } = await supabase.from('notifications').update({ is_read: true }).eq('id', id);
       if (error) throw error;
     } catch (err: any) {
+      if (isConnectionError(err) && isDefaultUrl) return;
       handleSupabaseError(err);
     }
   },
@@ -172,45 +161,20 @@ export const api = {
           }
       });
 
-      // 2. Edge Function (Persistence & Truth)
+      // 2. Direct DB Insert (Persistence & Truth)
       try {
-          const response = await fetch(`${SUPABASE_URL}/functions/v1/send-notification`, {
-              method: 'POST',
-              headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${SUPABASE_KEY}`
-              },
-              body: JSON.stringify({ 
-                  user_id: userId, 
-                  sender_id: senderId, 
-                  type, 
-                  reference_id: dbReferenceId, 
-                  data: {
-                      media_url: mediaUrl,
-                      sender_username: senderUsername
-                  }
-              })
+          // Note: We omit media_url and sender_username from DB insert as they are not in the schema.
+          // The receiver will fetch these via joins (sender_profile) or they will be passed via the optimistic broadcast.
+          const { error } = await supabase.from('notifications').insert({
+              user_id: userId,
+              sender_id: senderId,
+              type,
+              reference_id: dbReferenceId,
+              is_read: false
           });
-
-          if (!response.ok) {
-              throw new Error(`Edge Function returned ${response.status}`);
-          }
-      } catch (e: any) {
-          console.warn("Edge Function failed, falling back to direct DB insert", e);
-          // Fallback: Direct insert into notifications table
-          try {
-              // Note: We omit media_url from DB insert as it might not be in the schema
-              const { error } = await supabase.from('notifications').insert({
-                  user_id: userId,
-                  sender_id: senderId,
-                  type,
-                  reference_id: dbReferenceId,
-                  is_read: false
-              });
-              if (error) throw error;
-          } catch (dbErr: any) {
-              console.error("Direct notification insert failed:", dbErr.message, dbErr.details, dbErr.hint);
-          }
+          if (error) throw error;
+      } catch (dbErr: any) {
+          console.error("Direct notification insert failed:", dbErr.message, dbErr.details, dbErr.hint);
       }
   },
 
@@ -269,25 +233,54 @@ export const api = {
 
   getCurrentUser: async (): Promise<CurrentUser> => {
     try {
-        const { data: { user }, error: authError } = await supabase.auth.getUser();
-        if (authError || !user) {
-            throw authError || new Error('No user logged in');
+        // Use getSession first as it's faster (local storage)
+        const { data: sessionData } = await supabase.auth.getSession();
+        let user = sessionData?.session?.user;
+        
+        if (!user) {
+            const { data: authData, error: authError } = await supabase.auth.getUser();
+            if (authError || !authData?.user) {
+                throw authError || new Error('No user logged in');
+            }
+            user = authData.user;
         }
         
-        // Fetch profile data
-        const { data, error } = await supabase
-            .from('profiles')
-            .select('*')
-            .eq('id', user.id)
-            .maybeSingle();
-            
-        if (error) throw error;
+        // Fetch profile data with a 5s timeout
+        const fetchProfile = async () => {
+            try {
+                const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000));
+                const { data, error } = await Promise.race([
+                    supabase.from('profiles').select('*').eq('id', user.id).maybeSingle(),
+                    timeout
+                ]) as any;
+                if (error) {
+                    if (!isConnectionError(error) || !isDefaultUrl) {
+                        console.error('Error fetching profile:', error);
+                    }
+                    handleSupabaseError(error);
+                }
+                return data;
+            } catch (e) {
+                if (e instanceof Error && (e.message === 'timeout' || (e as any).isDefaultUrlError)) {
+                    if (!isDefaultUrl) console.warn('Profile fetch timed out, using fallback');
+                    return null;
+                }
+                throw e;
+            }
+        };
+
+        const data = await fetchProfile();
         
         // Fetch real-time counts directly from follows table
         const fetchCount = async (query: any) => {
-            const { count, error } = await query;
-            if (error) return 0;
-            return count || 0;
+            try {
+                const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 5000));
+                const { count, error } = await Promise.race([query, timeoutPromise]) as any;
+                if (error) return 0;
+                return count || 0;
+            } catch (e) {
+                return 0;
+            }
         };
 
         const followersPromise = fetchCount(supabase
@@ -312,7 +305,6 @@ export const api = {
             following_count: followingCount
         };
     } catch (err: any) {
-        handleSupabaseError(err);
         throw err;
     }
   },
@@ -359,19 +351,26 @@ export const api = {
     }
     
     try {
-        const { data, error } = await supabase
-            .from('profiles')
-            .select('*')
-            .eq('id', userId)
-            .single();
+        const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000));
+        const { data, error } = await Promise.race([
+            supabase.from('profiles').select('*').eq('id', userId).single(),
+            timeout
+        ]) as any;
         
-        if (error) throw error;
+        if (error) {
+            throw error;
+        }
 
         // Fetch real-time counts from the source of truth
         const fetchCount = async (query: any) => {
-            const { count, error } = await query;
-            if (error) return 0;
-            return count || 0;
+            try {
+                const countTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000));
+                const { count, error } = await Promise.race([query, countTimeout]) as any;
+                if (error) return 0;
+                return count || 0;
+            } catch (e) {
+                return 0;
+            }
         };
 
         const followersPromise = fetchCount(supabase
@@ -399,7 +398,6 @@ export const api = {
             following_count: followingCount 
         };
     } catch (err) {
-        handleSupabaseError(err);
         throw err;
     }
   },
@@ -413,83 +411,58 @@ export const api = {
   getFeed: async (): Promise<Post[]> => {
     const { data: { user } } = await supabase.auth.getUser();
 
-    try {
-        const { data, error } = await supabase
-            .from('posts')
-            .select(`
-                *,
-                profiles:user_id(*),
-                likes(count),
-                comments(count)
-            `)
-            .order('created_at', { ascending: false });
-            
-        if (error) throw error;
-        
-        const feedData = data || [];
-        
-        // Batch fetch 'has_liked' status for the current user
-        let likedPostIds = new Set<string>();
-        if (user) {
-            try {
-                const { data: likesData } = await supabase
-                    .from('likes')
-                    .select('post_id')
-                    .eq('user_id', user.id);
-                likesData?.forEach((l: any) => likedPostIds.add(l.post_id));
-            } catch (e) {
-                console.warn('Likes status fetch failed:', e);
+    const fetchFeed = async () => {
+        try {
+            const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000));
+            const { data, error } = await Promise.race([
+                supabase
+                .from('posts')
+                .select(`
+                    *,
+                    profiles:user_id(*),
+                    likes(count),
+                    comments(count)
+                `)
+                .order('created_at', { ascending: false }),
+                timeout
+            ]) as any;
+            if (error) {
+                handleSupabaseError(error);
             }
+            return data || [];
+        } catch (e: any) {
+            throw e;
         }
-        
-        return feedData.map((p: any) => ({
-             ...p,
-             profiles: p.profiles,
-             likes_count: p.likes?.[0]?.count || 0,
-             comments_count: p.comments?.[0]?.count || 0,
-             has_liked: likedPostIds.has(p.id)
-        }));
-    } catch (err: any) {
-        handleSupabaseError(err);
-        return [];
-    }
-  },
+    };
 
-  subscribeToPosts: (callback: (post: Post) => void) => {
-    return supabase
-      .channel('public_posts')
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'posts',
-        },
-        async (payload) => {
-          // Fetch the full post with profiles and counts
-          const { data, error } = await supabase
-            .from('posts')
-            .select(`
-                *,
-                profiles:user_id(*),
-                likes(count),
-                comments(count)
-            `)
-            .eq('id', payload.new.id)
-            .single();
-          
-          if (!error && data) {
-            callback({
-              ...data,
-              profiles: data.profiles,
-              likes_count: data.likes?.[0]?.count || 0,
-              comments_count: data.comments?.[0]?.count || 0,
-              has_liked: false
-            });
-          }
+    const data = await fetchFeed();
+    
+    // Batch fetch 'has_liked' status for the current user
+    let likedPostIds = new Set<string>();
+    if (user) {
+        try {
+            const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000));
+            const { data: likesData } = await Promise.race([
+                supabase
+                .from('likes')
+                .select('post_id')
+                .eq('user_id', user.id),
+                timeout
+            ]) as any;
+            likesData?.forEach((l: any) => likedPostIds.add(l.post_id));
+        } catch (e) {
+            console.warn('Likes status fetch timed out or failed:', e);
         }
-      )
-      .subscribe();
+    }
+    
+    return data.map((p: any) => ({
+         ...p,
+         profiles: p.profiles,
+         // Use the count from relations, fallback to 0
+         likes_count: p.likes?.[0]?.count || 0,
+         comments_count: p.comments?.[0]?.count || 0,
+         has_liked: likedPostIds.has(p.id)
+    }));
   },
 
   getPost: async (postId: string): Promise<Post | null> => {
@@ -540,7 +513,9 @@ export const api = {
             .eq('user_id', userId)
             .order('created_at', { ascending: false });
         
-        if (error) throw error;
+        if (error) {
+            throw error;
+        }
         
         return (data || []).map((p: any) => ({
             ...p,
@@ -550,8 +525,7 @@ export const api = {
             has_liked: false // Will be updated by the component if needed
         }));
     } catch (err) {
-        handleSupabaseError(err);
-        return [];
+        throw err;
     }
   },
 
@@ -590,46 +564,9 @@ export const api = {
   },
 
   // --- Comments ---
-  subscribeToPostInteractions: (postId: string, onLike: (payload: any) => void, onComment: (payload: any) => void) => {
-    return supabase
-      .channel(`post_interactions:${postId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'likes',
-          filter: `post_id=eq.${postId}`
-        },
-        onLike
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'comments',
-          filter: `post_id=eq.${postId}`
-        },
-        onComment
-      )
-      .subscribe();
-  },
-
   getComments: async (postId: string): Promise<Comment[]> => {
-    try {
-      const { data, error } = await supabase
-        .from('comments')
-        .select('*, profile:user_id(*)')
-        .eq('post_id', postId)
-        .order('created_at', { ascending: true });
-      
-      if (error) throw error;
-      return data || [];
-    } catch (err) {
-      handleSupabaseError(err);
-      return [];
-    }
+    const { data } = await supabase.from('comments').select('*, profile:user_id(*)').eq('post_id', postId).order('created_at', { ascending: true });
+    return data || [];
   },
 
   addComment: async (postId: string, userId: string, content: string, ownerId: string, senderUsername?: string, mediaUrl?: string): Promise<Comment> => {
@@ -662,65 +599,14 @@ export const api = {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return [];
 
-      try {
-        const { data, error } = await supabase.from('messages').select('*')
-           .or(`and(sender_id.eq.${user.id},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${user.id})`)
-           .order('created_at', { ascending: true });
-           
-        if (error) throw error;
-        
-        // Parse JSON content if necessary
-        return (data || []).map(parseMessageContent);
-      } catch (err) {
-        handleSupabaseError(err);
-        return [];
-      }
-  },
-
-  subscribeToMessages: (userId: string, friendId: string, callback: (message: Message) => void) => {
-    // We listen for messages where the current user is either sender or receiver
-    // and the other party is friendId
-    const channelName = `messages:${[userId, friendId].sort().join('-')}`;
-    return supabase
-      .channel(channelName)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'messages',
-          // Note: Supabase filter syntax is limited, so we'll filter in JS if needed
-          // or use a broader channel. For now, we'll listen to all inserts and filter in callback.
-        },
-        (payload) => {
-          const msg = parseMessageContent(payload.new);
-          if ((msg.sender_id === userId && msg.receiver_id === friendId) || 
-              (msg.sender_id === friendId && msg.receiver_id === userId)) {
-            callback(msg);
-          }
-        }
-      )
-      .subscribe();
-  },
-
-  subscribeToUserMessages: (userId: string, callback: (message: Message) => void) => {
-    return supabase
-      .channel(`user_messages:${userId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'messages',
-        },
-        (payload) => {
-          const msg = parseMessageContent(payload.new);
-          if (msg.sender_id === userId || msg.receiver_id === userId) {
-            callback(msg);
-          }
-        }
-      )
-      .subscribe();
+      const { data, error } = await supabase.from('messages').select('*')
+         .or(`and(sender_id.eq.${user.id},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${user.id})`)
+         .order('created_at', { ascending: true });
+         
+      if (error) throw error;
+      
+      // Parse JSON content if necessary
+      return (data || []).map(parseMessageContent);
   },
 
   getLastMessage: async (friendId: string): Promise<Message | null> => {
@@ -779,6 +665,21 @@ export const api = {
       if (error) throw error;
 
       if (data) {
+          // Broadcast the message to the specific chat channel
+          const channelName = receiverId === 'codex' ? 'public-codex-chat' : `dm-${[senderId, receiverId].sort().join('-')}`;
+          const channel = supabase.channel(channelName);
+          channel.subscribe((status) => {
+              if (status === 'SUBSCRIBED') {
+                  channel.send({
+                      type: 'broadcast',
+                      event: 'new_message',
+                      payload: data
+                  }).then(() => {
+                      supabase.removeChannel(channel);
+                  });
+              }
+          });
+
           await api.sendNotification(receiverId, senderId, 'message', data.id, mediaUrl, senderUsername);
       }
       

@@ -12,10 +12,6 @@ const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsI
 const isDefaultUrl = SUPABASE_URL === DEFAULT_URL;
 const IS_MOCK_MODE = typeof window !== 'undefined' && localStorage.getItem('supabase_mock_mode') === 'true';
 
-if (isDefaultUrl && !IS_MOCK_MODE) {
-  console.warn('⚠️ Using default Supabase URL. If you encounter "Failed to fetch", please set your own VITE_SUPABASE_URL and VITE_SUPABASE_KEY in the project settings.');
-}
-
 // --- Mock Data ---
 const MOCK_USER: CurrentUser = {
     id: 'mock-user-id',
@@ -58,19 +54,17 @@ const MOCK_POSTS: Post[] = [
 ];
 
 // Helper to handle "Failed to fetch" errors consistently
+const isConnectionError = (err: any) => {
+  return err.message === 'Failed to fetch' || 
+         (err.name === 'TypeError' && err.message.includes('fetch')) ||
+         (err.message && err.message.toLowerCase().includes('failed to fetch')) ||
+         err.message === 'timeout';
+};
+
 const handleSupabaseError = (err: any) => {
-  const isFetchError = err.message === 'Failed to fetch' || 
-                      (err.name === 'TypeError' && err.message.includes('fetch')) ||
-                      (err.message && err.message.toLowerCase().includes('failed to fetch')) ||
-                      err.message === 'timeout';
-  
-  if (isFetchError) {
+  if (isConnectionError(err)) {
     if (isDefaultUrl) {
-        // Automatically enable mock mode for future requests if we're on the default URL
-        if (typeof window !== 'undefined') {
-            localStorage.setItem('supabase_mock_mode', 'true');
-        }
-        const msg = 'Unable to connect to the default Supabase project. Switching to Demo Mode...';
+        const msg = 'Unable to connect to the default Supabase project. Showing demo data for preview...';
         const error = new Error(msg) as any;
         error.isDefaultUrlError = true;
         error.silent = true;
@@ -165,14 +159,27 @@ export const api = {
               if (error) throw error;
 
               // Broadcast to GLOBAL channel so everyone sees it instantly
-              const globalChannel = supabase.channel('global_activities');
-              await globalChannel.send({
-                  type: 'broadcast',
-                  event: 'activity',
-                  payload: { 
-                      ...insertedData,
-                      sender_profile: Array.isArray(insertedData.sender_profile) ? insertedData.sender_profile[0] : insertedData.sender_profile,
-                      receiver_profile: Array.isArray(insertedData.receiver_profile) ? insertedData.receiver_profile[0] : insertedData.receiver_profile
+              const sendChannel = supabase.channel('global_activities');
+              sendChannel.subscribe((status) => {
+                  if (status === 'SUBSCRIBED') {
+                      sendChannel.send({
+                          type: 'broadcast',
+                          event: 'activity',
+                          payload: { 
+                              ...insertedData,
+                              sender_profile: Array.isArray(insertedData.sender_profile) ? insertedData.sender_profile[0] : insertedData.sender_profile,
+                              receiver_profile: Array.isArray(insertedData.receiver_profile) ? insertedData.receiver_profile[0] : insertedData.receiver_profile
+                          }
+                      }).then(() => {
+                          console.log("Broadcast sent successfully on global_activities");
+                          // We don't remove the channel here because it's a shared channel name, 
+                          // but since we just created this instance, we can untrack it or just let it be.
+                          // Actually, it's better to remove this specific instance to avoid leaks.
+                          supabase.removeChannel(sendChannel);
+                      }).catch(err => {
+                          console.error("Broadcast failed", err);
+                          supabase.removeChannel(sendChannel);
+                      });
                   }
               });
           } catch (dbErr: any) {
@@ -235,7 +242,6 @@ export const api = {
   },
 
   getCurrentUser: async (): Promise<CurrentUser> => {
-    if (IS_MOCK_MODE) return MOCK_USER;
     try {
         // Use getSession first as it's faster (local storage)
         const { data: sessionData } = await supabase.auth.getSession();
@@ -243,7 +249,20 @@ export const api = {
         
         if (!user) {
             const { data: authData, error: authError } = await supabase.auth.getUser();
-            if (authError || !authData?.user) throw authError || new Error('No user logged in');
+            if (authError || !authData?.user) {
+                // If no user is logged in, and we are explicitly in mock mode, show mock user
+                if (IS_MOCK_MODE) return MOCK_USER;
+                // If on default URL and unreachable, show mock user
+                if (isDefaultUrl) {
+                    try {
+                        // Quick check if reachable
+                        await supabase.from('profiles').select('id').limit(1);
+                    } catch (e) {
+                        return MOCK_USER;
+                    }
+                }
+                throw authError || new Error('No user logged in');
+            }
             user = authData.user;
         }
         
@@ -265,26 +284,20 @@ export const api = {
                     console.warn('Profile fetch timed out, using fallback');
                     return null;
                 }
-                // Re-throw if it's a fetch error we want to handle at the top level
                 throw e;
             }
         };
 
         const data = await fetchProfile();
         
-        // Fetch real-time counts directly from follows table - wrap in try/catch to prevent blocking
+        // Fetch real-time counts directly from follows table
         const fetchCount = async (query: any) => {
             try {
-                // Add a 5s timeout for count queries
                 const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 5000));
                 const { count, error } = await Promise.race([query, timeoutPromise]) as any;
-                if (error) {
-                    handleSupabaseError(error);
-                    return 0;
-                }
+                if (error) return 0;
                 return count || 0;
             } catch (e) {
-                console.warn('Count fetch timed out or failed:', e);
                 return 0;
             }
         };
@@ -301,7 +314,6 @@ export const api = {
         
         const [followersCount, followingCount] = await Promise.all([followersPromise, followingPromise]);
         
-        // Return merged data or fallback from auth metadata
         return {
             id: user.id,
             username: data?.username || user.user_metadata?.full_name?.replace(/\s+/g, '_').toLowerCase() || user.email?.split('@')[0] || 'user',
@@ -312,17 +324,11 @@ export const api = {
             following_count: followingCount
         };
     } catch (err: any) {
-        // If it's the default URL and we hit a connection error, fallback to mock user silently
-        try {
-            handleSupabaseError(err);
-        } catch (e: any) {
-            if (isDefaultUrl && (e.isDefaultUrlError || e.message?.includes('Unable to connect'))) {
-                console.warn('Auth: Default project unreachable, using mock user');
-                return MOCK_USER;
-            }
-            throw e;
+        if (IS_MOCK_MODE || (isDefaultUrl && isConnectionError(err))) {
+            console.warn('Auth: Default project unreachable or mock mode, using mock user');
+            return MOCK_USER;
         }
-        return MOCK_USER; // Should not reach here if handleSupabaseError throws
+        throw err;
     }
   },
 
@@ -361,54 +367,61 @@ export const api = {
 
   // --- Profiles ---
   getUserProfile: async (userId: string, existingUser?: any): Promise<Profile> => {
-    if (IS_MOCK_MODE) return MOCK_USER;
     let user = existingUser;
     if (!user) {
         const { data: { user: authUser } } = await supabase.auth.getUser();
         user = authUser;
     }
     
-    const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
-    if (error) {
-        if (IS_MOCK_MODE || (isDefaultUrl && error.message?.includes('Failed to fetch'))) return MOCK_USER;
-        throw error;
-    }
-
-    // Fetch real-time counts from the source of truth - wrap in try/catch to prevent blocking
-    const fetchCount = async (query: any) => {
-        try {
-            const { count, error } = await query;
-            if (error) return 0;
-            return count || 0;
-        } catch (e) {
-            return 0;
+    try {
+        const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
+        
+        if (error) {
+            if ((IS_MOCK_MODE || isDefaultUrl) && (error.message?.includes('Failed to fetch') || error.code === 'PGRST116')) {
+                return MOCK_USER;
+            }
+            throw error;
         }
-    };
 
-    const followersPromise = fetchCount(supabase
-        .from('follows')
-        .select('*', { count: 'exact', head: true })
-        .eq('following_id', userId));
+        // Fetch real-time counts from the source of truth
+        const fetchCount = async (query: any) => {
+            try {
+                const { count, error } = await query;
+                if (error) return 0;
+                return count || 0;
+            } catch (e) {
+                return 0;
+            }
+        };
 
-    const followingPromise = fetchCount(supabase
-        .from('follows')
-        .select('*', { count: 'exact', head: true })
-        .eq('follower_id', userId));
+        const followersPromise = fetchCount(supabase
+            .from('follows')
+            .select('*', { count: 'exact', head: true })
+            .eq('following_id', userId));
 
-    const [followersCount, followingCount] = await Promise.all([followersPromise, followingPromise]);
+        const followingPromise = fetchCount(supabase
+            .from('follows')
+            .select('*', { count: 'exact', head: true })
+            .eq('follower_id', userId));
 
-    let isFollowing = false;
-    if (user && user.id !== userId) {
-         const { data: follow } = await supabase.from('follows').select('*').match({ follower_id: user.id, following_id: userId }).maybeSingle();
-         isFollowing = !!follow;
+        const [followersCount, followingCount] = await Promise.all([followersPromise, followingPromise]);
+
+        let isFollowing = false;
+        if (user && user.id !== userId) {
+             const { data: follow } = await supabase.from('follows').select('*').match({ follower_id: user.id, following_id: userId }).maybeSingle();
+             isFollowing = !!follow;
+        }
+
+        return { 
+            ...data, 
+            is_following: isFollowing,
+            followers_count: followersCount,
+            following_count: followingCount 
+        };
+    } catch (err) {
+        if (IS_MOCK_MODE || (isDefaultUrl && isConnectionError(err))) return MOCK_USER;
+        throw err;
     }
-
-    return { 
-        ...data, 
-        is_following: isFollowing,
-        followers_count: followersCount,
-        following_count: followingCount 
-    };
   },
 
   getAllProfiles: async (): Promise<Profile[]> => {
@@ -418,11 +431,8 @@ export const api = {
 
   // --- Feed & Posts ---
   getFeed: async (): Promise<Post[]> => {
-    if (IS_MOCK_MODE) return MOCK_POSTS;
     const { data: { user } } = await supabase.auth.getUser();
 
-    // Fetch posts with profiles and real-time counts from related tables
-    // 5s timeout for feed query
     const fetchFeed = async () => {
         try {
             const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000));
@@ -443,19 +453,21 @@ export const api = {
             }
             return data || [];
         } catch (e: any) {
-            if (e instanceof Error && e.message === 'timeout') {
-                console.warn('Feed fetch timed out, using fallback');
-                return IS_MOCK_MODE ? MOCK_POSTS : [];
-            }
-            if (isDefaultUrl && (e.message?.includes('Unable to connect') || e.isDefaultUrlError)) {
+            if ((isDefaultUrl || IS_MOCK_MODE) && (e.message?.includes('Unable to connect') || e.isDefaultUrlError || e.message === 'timeout')) {
+                console.warn('Feed: Using demo posts fallback');
                 return MOCK_POSTS;
             }
-            handleSupabaseError(e);
-            return [];
+            throw e;
         }
     };
 
     const data = await fetchFeed();
+    
+    // If we got real data but it's empty, and we're on default URL, maybe show demo posts
+    // but only if the user isn't logged in or has no posts.
+    if (data.length === 0 && isDefaultUrl && !user) {
+        return MOCK_POSTS;
+    }
     
     // Batch fetch 'has_liked' status for the current user
     let likedPostIds = new Set<string>();
@@ -521,8 +533,38 @@ export const api = {
   },
 
   getUserPosts: async (userId: string): Promise<Post[]> => {
-      const { data } = await supabase.from('posts').select('*').eq('user_id', userId).order('created_at', { ascending: false });
-      return data || [];
+    try {
+        const { data, error } = await supabase
+            .from('posts')
+            .select(`
+                *,
+                profiles:user_id(*),
+                likes(count),
+                comments(count)
+            `)
+            .eq('user_id', userId)
+            .order('created_at', { ascending: false });
+        
+        if (error) {
+            if ((IS_MOCK_MODE || (isDefaultUrl && isConnectionError(error))) && error.message?.includes('Failed to fetch')) {
+                return userId === MOCK_USER.id ? MOCK_POSTS : [];
+            }
+            throw error;
+        }
+        
+        return (data || []).map((p: any) => ({
+            ...p,
+            profiles: p.profiles,
+            likes_count: p.likes?.[0]?.count || 0,
+            comments_count: p.comments?.[0]?.count || 0,
+            has_liked: false // Will be updated by the component if needed
+        }));
+    } catch (err) {
+        if (IS_MOCK_MODE || isDefaultUrl) {
+            return userId === MOCK_USER.id ? MOCK_POSTS : [];
+        }
+        throw err;
+    }
   },
 
   createPost: async (imageUrl: string, caption: string, userId: string): Promise<void> => {
@@ -533,7 +575,7 @@ export const api = {
     await supabase.from('posts').delete().eq('id', postId);
   },
 
-  likePost: async (postId: string, userId: string, ownerId: string, senderUsername?: string): Promise<void> => {
+  likePost: async (postId: string, userId: string, ownerId: string, senderUsername?: string, mediaUrl?: string): Promise<void> => {
     // Check if already liked
     const { data } = await supabase.from('likes').select('id').match({ user_id: userId, post_id: postId }).single();
     
@@ -543,7 +585,7 @@ export const api = {
         await supabase.from('likes').insert({ user_id: userId, post_id: postId });
         // Trigger notification if not self-like
         if (userId !== ownerId) {
-            await api.sendNotification(ownerId, userId, 'like', postId, undefined, senderUsername);
+            await api.sendNotification(ownerId, userId, 'like', postId, mediaUrl, senderUsername);
         }
     }
   },
@@ -557,13 +599,13 @@ export const api = {
     return data || [];
   },
 
-  addComment: async (postId: string, userId: string, content: string, ownerId: string, senderUsername?: string): Promise<Comment> => {
+  addComment: async (postId: string, userId: string, content: string, ownerId: string, senderUsername?: string, mediaUrl?: string): Promise<Comment> => {
     const { data, error } = await supabase.from('comments').insert({ post_id: postId, user_id: userId, content }).select('*, profile:user_id(*)').single();
     if (error) throw error;
     
     // Trigger notification if not self-comment
     if (userId !== ownerId) {
-        await api.sendNotification(ownerId, userId, 'comment', postId, undefined, senderUsername);
+        await api.sendNotification(ownerId, userId, 'comment', postId, mediaUrl, senderUsername);
     }
     
     return data;

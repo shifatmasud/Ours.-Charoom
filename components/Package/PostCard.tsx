@@ -13,6 +13,8 @@ import { DS } from '../../Theme';
 import { formatDistanceToNow } from 'date-fns';
 import { Lightbox } from '../Core/Lightbox';
 
+import { useModal } from '../../contexts/ModalContext';
+
 interface PostCardProps {
   post: Post;
   currentUser: CurrentUser;
@@ -21,6 +23,7 @@ interface PostCardProps {
 const LIKE_COLOR = '#FF4F1F'; // Reddish Orange (Accent)
 
 export const PostCard: React.FC<PostCardProps> = ({ post, currentUser }) => {
+  const { showAlert, showConfirm } = useModal();
   const [isLiked, setIsLiked] = useState(post.has_liked);
   const [likesCount, setLikesCount] = useState(post.likes_count || 0);
   const [showHeartOverlay, setShowHeartOverlay] = useState(false);
@@ -68,7 +71,7 @@ export const PostCard: React.FC<PostCardProps> = ({ post, currentUser }) => {
     }
 
     try {
-       await api.likePost(post.id, currentUser.id, post.user_id, currentUser.username);
+       await api.likePost(post.id, currentUser.id, post.user_id, currentUser.username, post.image_url);
     } catch (e) {
        console.error("Failed to toggle like", e);
     }
@@ -89,7 +92,7 @@ export const PostCard: React.FC<PostCardProps> = ({ post, currentUser }) => {
     const text = newComment;
     setNewComment('');
     try {
-      const savedComment = await api.addComment(post.id, currentUser.id, text, post.user_id, currentUser.username);
+      const savedComment = await api.addComment(post.id, currentUser.id, text, post.user_id, currentUser.username, post.image_url);
       setComments(prev => [...prev, savedComment]);
     } catch (e) {
       console.error("Failed to comment", e);
@@ -118,26 +121,26 @@ export const PostCard: React.FC<PostCardProps> = ({ post, currentUser }) => {
   };
 
   const handleDeletePost = async () => {
-    if (!window.confirm("Delete this post?")) return;
+    const confirmed = await showConfirm("Are you sure you want to delete this moment? This cannot be undone.", "Delete Moment");
+    if (!confirmed) return;
     try {
         await api.deletePost(post.id);
         setIsDeleted(true);
     } catch (e) {
         console.error("Failed to delete post", e);
-        alert("Failed to delete post. Please try again.");
+        showAlert("Failed to delete post. Please try again.", "Error");
     }
   };
 
-  // Force re-save
-
   const handleDeleteComment = async (commentId: string) => {
-    if (!window.confirm("Delete this comment?")) return;
+    const confirmed = await showConfirm("Delete this comment?", "Delete Comment");
+    if (!confirmed) return;
     try {
         await api.deleteComment(commentId);
         setComments(prev => prev.filter(c => c.id !== commentId));
     } catch (e) {
         console.error("Failed to delete comment", e);
-        alert("Failed to delete comment.");
+        showAlert("Failed to delete comment.", "Error");
     }
   };
 

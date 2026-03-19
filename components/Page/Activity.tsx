@@ -9,119 +9,35 @@ import { Bell, Heart, ChatCircle, UserPlus, CaretLeft, ArrowsClockwise } from '@
 import { formatDistanceToNow } from 'date-fns';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import { useNotifications } from '../../contexts/NotificationContext';
 import { Loader } from '../Core/Loader';
 
 export const Activity: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const { notifications, refreshNotifications, markAsRead } = useNotifications();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [isLive, setIsLive] = useState(false);
+  const [isLive, setIsLive] = useState(true);
 
-  const fetchNotifications = async (isManual = false) => {
-     if (isManual) setRefreshing(true);
-     try {
-         const data = await api.getNotifications();
-         setNotifications(data);
-     } catch (e) {
-         console.error("Activity: Failed to load notifications", e);
-     } finally {
-         if (isManual) setRefreshing(true);
-         setTimeout(() => setRefreshing(false), 600);
-     }
+  const handleRefresh = async () => {
+      setRefreshing(true);
+      await refreshNotifications();
+      setTimeout(() => setRefreshing(false), 600);
   };
 
   useEffect(() => {
-    let mounted = true;
-    let activityTimeout: any;
-
-    const load = async () => {
-        try {
-            // 8s safety timeout
-            activityTimeout = setTimeout(() => {
-                if (mounted) {
-                    console.warn('Activity: Data loading timed out');
-                    setLoading(false);
-                }
-            }, 8000);
-
-            await fetchNotifications();
-            if (mounted) setLoading(false);
-        } catch (e) {
-            console.error('Activity: Error loading data:', e);
-        } finally {
-            if (mounted) setLoading(false);
-            if (activityTimeout) clearTimeout(activityTimeout);
-        }
-    };
-    load();
-    
-    // Real-time Subscription
-    let channel: any;
-    const subscribe = async () => {
-        if (channel) {
-            await supabase.removeChannel(channel);
-        }
-        
-        console.log("Activity: Subscribing to GLOBAL activities");
-        
-        // Use global channel for all activities
-        channel = supabase.channel('global_activities')
-            // 1. Instant Delivery via Broadcast (from Edge Function or Client)
-            .on('broadcast', { event: 'activity' }, async (payload) => {
-                console.log("Activity: Global broadcast received", payload);
-                if (mounted) {
-                    // Prepend the new notification instantly
-                    if (payload.payload) {
-                        setNotifications(prev => [payload.payload, ...prev].slice(0, 100));
-                    } else {
-                        await fetchNotifications();
-                    }
-                }
-            })
-            // 2. Consistency via Postgres Changes (DB sync)
-            .on(
-                'postgres_changes',
-                { event: 'INSERT', schema: 'public', table: 'notifications' },
-                async (payload) => {
-                    console.log("Activity: Global DB insert received", payload);
-                    if (mounted) {
-                        // Refresh to ensure we have the latest DB state with profiles
-                        await fetchNotifications();
-                    }
-                }
-            )
-            .subscribe(async (status, err) => {
-                console.log("Activity: Global subscription status:", status, err);
-                if (mounted) setIsLive(status === 'SUBSCRIBED');
-                
-                if (status === 'CHANNEL_ERROR') {
-                    console.error("Activity: Channel error:", err);
-                    if (channel) await supabase.removeChannel(channel);
-                    setTimeout(() => {
-                        if (mounted) {
-                            console.log("Activity: Retrying global subscription...");
-                            subscribe();
-                        }
-                    }, 5000);
-                }
-            });
-    };
-    subscribe();
-
-    return () => {
-        mounted = false;
-        if (channel) supabase.removeChannel(channel);
-        if (activityTimeout) clearTimeout(activityTimeout);
-    };
-  }, [user]);
+    if (notifications.length > 0 || !loading) {
+        setLoading(false);
+    }
+    // If we've been loading for a while and still have no notifications, stop loading
+    const timer = setTimeout(() => setLoading(false), 2000);
+    return () => clearTimeout(timer);
+  }, [notifications, loading]);
 
   const handleInteraction = async (n: Notification) => {
-      // Optimistic update
       if (!n.is_read) {
-          setNotifications(prev => prev.map(item => item.id === n.id ? { ...item, is_read: true } : item));
-          await api.markNotificationRead(n.id);
+          await markAsRead(n.id);
       }
 
       if (n.type === 'follow') {
@@ -191,7 +107,7 @@ export const Activity: React.FC = () => {
                 </div>
                 
                 <button 
-                    onClick={() => fetchNotifications(true)}
+                    onClick={handleRefresh}
                     disabled={refreshing}
                     style={{ 
                         background: DS.Color.Base.Surface[2], 

@@ -14,14 +14,15 @@ import { useTheme } from '../../ThemeContext';
 import { Confetti } from '../Core/Confetti';
 
 import { useAuth } from '../../contexts/AuthContext';
+import { useNotifications } from '../../contexts/NotificationContext';
 
 export const Feed: React.FC = () => {
   const { user: currentUser } = useAuth();
+  const { unreadCount } = useNotifications();
   const { mode, toggleTheme } = useTheme();
   const navigate = useNavigate();
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
-  const [unreadCount, setUnreadCount] = useState(0);
 
   // Input State
   const [caption, setCaption] = useState('');
@@ -51,13 +52,6 @@ export const Feed: React.FC = () => {
 
         const feedData = await api.getFeed();
         if (mounted) setPosts(feedData);
-        
-        // Initial Notification Check
-        if (currentUser) {
-          const notifs = await api.getNotifications();
-          if (mounted) setUnreadCount(notifs.filter(n => !n.is_read).length);
-        }
-
       } catch (e) {
         console.error('Feed: Error loading data:', e);
       } finally {
@@ -67,31 +61,8 @@ export const Feed: React.FC = () => {
     };
     loadData();
     
-    // Realtime Notification Subscription
-    let channel: any;
-    if (currentUser) {
-      // Use global channel for all platform activities
-      channel = supabase.channel('global_activities')
-      // 1. Instant Delivery via Broadcast
-      .on('broadcast', { event: 'activity' }, (payload) => {
-          console.log("Feed: Global broadcast activity received", payload);
-          if (mounted) setUnreadCount(prev => prev + 1);
-      })
-      // 2. Consistency via Postgres Changes (DB sync)
-      .on(
-         'postgres_changes',
-         { event: 'INSERT', schema: 'public', table: 'notifications' },
-         (payload) => {
-             console.log("Feed: Global DB notification received", payload);
-             if (mounted) setUnreadCount(prev => prev + 1);
-         }
-      )
-      .subscribe();
-    }
-
     return () => {
         mounted = false;
-        if(channel) supabase.removeChannel(channel);
         if (pressTimer.current) clearTimeout(pressTimer.current);
         if (feedTimeout) clearTimeout(feedTimeout);
     };

@@ -9,6 +9,8 @@ interface AuthContextType {
   refreshAuth: () => Promise<void>;
   setUser: (user: CurrentUser | null) => void;
   connectionError: string | null;
+  isMockMode: boolean;
+  setMockMode: (enabled: boolean) => void;
 }
 
 const AuthContext = createContext<AuthContextType>({ 
@@ -16,7 +18,9 @@ const AuthContext = createContext<AuthContextType>({
   loading: true,
   refreshAuth: async () => {},
   setUser: () => {},
-  connectionError: null
+  connectionError: null,
+  isMockMode: false,
+  setMockMode: () => {}
 });
 
 export const useAuth = () => useContext(AuthContext);
@@ -38,6 +42,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return !hasCache;
   });
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [isMockMode, setIsMockMode] = useState(() => {
+    return typeof window !== 'undefined' && localStorage.getItem('supabase_mock_mode') === 'true';
+  });
+
+  const setMockMode = (enabled: boolean) => {
+    setIsMockMode(enabled);
+    if (enabled) {
+      localStorage.setItem('supabase_mock_mode', 'true');
+    } else {
+      localStorage.removeItem('supabase_mock_mode');
+    }
+    window.location.reload();
+  };
 
   const updateUserInfo = (newUser: CurrentUser | null) => {
     console.log('Auth: Updating user info:', newUser?.id || 'null');
@@ -165,7 +182,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, loading, refreshAuth, setUser: updateUserInfo, connectionError }}>
+    <AuthContext.Provider value={{ 
+      user, 
+      loading, 
+      refreshAuth, 
+      setUser: updateUserInfo, 
+      connectionError,
+      isMockMode,
+      setMockMode
+    }}>
       {children}
     </AuthContext.Provider>
   );

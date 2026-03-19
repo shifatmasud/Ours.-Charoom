@@ -14,6 +14,8 @@ import { theme } from './Theme';
 import { ThemeProvider } from './ThemeContext';
 import { AnimatePresence, motion } from 'framer-motion';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { NotificationProvider, useNotifications } from './contexts/NotificationContext';
+import { ModalProvider } from './contexts/ModalContext';
 import { Loader } from './components/Core/Loader';
 import { api, supabase } from './services/supabaseClient';
 import { DS } from './Theme';
@@ -63,63 +65,43 @@ const AnimatedRoutes = () => {
 
 const NotificationContainer = () => {
     const { user } = useAuth();
+    const { lastActivity } = useNotifications();
     const [toast, setToast] = useState<{ message: string, visible: boolean } | null>(null);
 
     useEffect(() => {
-        if(!user) return;
+        if (!lastActivity || !user) return;
         
-        // Use global channel for all platform activities
-        const channel = supabase.channel('global_activities')
-            // 1. Instant Delivery via Broadcast
-            .on('broadcast', { event: 'activity' }, payload => {
-                console.log("App: Global broadcast activity received", payload);
-                const { type, sender_profile, receiver_profile, user_id } = payload.payload || {};
-                
-                const senderName = sender_profile?.username || 'Someone';
-                const receiverName = user_id === user.id ? 'your' : `${receiver_profile?.username}'s`;
-                const receiverNameFollow = user_id === user.id ? 'you' : receiver_profile?.username;
+        const { type, sender_profile, receiver_profile, user_id, sender_id } = lastActivity;
+        
+        // Skip toast for own actions to avoid self-spam
+        if (sender_id === user.id) return;
 
-                let msg = "";
-                if(type === 'like') msg = `${senderName} liked ${receiverName} moment`;
-                if(type === 'comment') msg = `${senderName} commented on ${receiverName} moment`;
-                if(type === 'follow') msg = `${senderName} started following ${receiverNameFollow}`;
-                
-                if (msg) {
-                    setToast({ message: msg, visible: true });
-                    setTimeout(() => setToast(null), 3000);
-                }
-            })
-            // 2. Consistency via Postgres Changes (DB sync)
-            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications' }, async (payload) => {
-                console.log("App: Global DB notification received", payload);
-                
-                // Fetch profiles for the toast if broadcast was missed
-                const { data: notif } = await supabase
-                    .from('notifications')
-                    .select('*, sender_profile:profiles!sender_id(*), receiver_profile:profiles!user_id(*)')
-                    .eq('id', payload.new.id)
-                    .single();
+        const senderName = sender_profile?.username || 'Someone';
+        const receiverName = user_id === user.id ? 'your' : `${receiver_profile?.username || 'someone'}'s`;
+        const receiverNameFollow = user_id === user.id ? 'you' : (receiver_profile?.username || 'someone');
 
-                if (notif) {
-                    const senderName = notif.sender_profile?.username || 'Someone';
-                    const receiverName = notif.user_id === user.id ? 'your' : `${notif.receiver_profile?.username}'s`;
-                    const receiverNameFollow = notif.user_id === user.id ? 'you' : notif.receiver_profile?.username;
+        let msg = "";
+        if(type === 'like') msg = `${senderName} liked ${receiverName} moment`;
+        if(type === 'comment') msg = `${senderName} commented on ${receiverName} moment`;
+        if(type === 'follow') msg = `${senderName} started following ${receiverNameFollow}`;
+        
+        if (msg) {
+            console.log("App: Showing toast:", msg);
+            setToast({ message: msg, visible: true });
+        }
+    }, [lastActivity?.id, user?.id]);
 
-                    let msg = "";
-                    if(notif.type === 'like') msg = `${senderName} liked ${receiverName} moment`;
-                    if(notif.type === 'comment') msg = `${senderName} commented on ${receiverName} moment`;
-                    if(notif.type === 'follow') msg = `${senderName} started following ${receiverNameFollow}`;
-
-                    if (msg) {
-                        setToast({ message: msg, visible: true });
-                        setTimeout(() => setToast(null), 3000);
-                    }
-                }
-            })
-            .subscribe();
-
-        return () => { supabase.removeChannel(channel); };
-    }, [user]);
+    // Auto-hide toast logic
+    useEffect(() => {
+        if (toast?.visible) {
+            const timer = setTimeout(() => {
+                setToast(prev => prev ? { ...prev, visible: false } : null);
+                // Completely clear after exit animation
+                setTimeout(() => setToast(null), 500);
+            }, 4000);
+            return () => clearTimeout(timer);
+        }
+    }, [toast?.message, toast?.visible]);
 
     return (
         <AnimatePresence>
@@ -143,7 +125,7 @@ const NotificationContainer = () => {
 }
 
 const ConnectionErrorBanner = () => {
-    const { connectionError, refreshAuth } = useAuth();
+    const { connectionError, refreshAuth, setMockMode } = useAuth();
     const [retrying, setRetrying] = useState(false);
     
     const handleRetry = async () => {
@@ -156,8 +138,7 @@ const ConnectionErrorBanner = () => {
     };
 
     const handleTryDemo = () => {
-        localStorage.setItem('supabase_mock_mode', 'true');
-        window.location.reload();
+        setMockMode(true);
     };
 
     const isDefaultUrlError = connectionError?.includes('default Supabase project');
@@ -233,6 +214,46 @@ const ConnectionErrorBanner = () => {
     );
 };
 
+const DemoModeBanner = () => {
+    const { isMockMode, setMockMode } = useAuth();
+    
+    if (!isMockMode) return null;
+
+    return (
+        <div style={{ 
+            background: DS.Color.Accent.Surface, 
+            color: 'white', 
+            padding: '8px 16px', 
+            fontSize: '11px', 
+            textAlign: 'center',
+            fontWeight: 600,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '12px',
+            textTransform: 'uppercase',
+            letterSpacing: '0.05em'
+        }}>
+            <span>🚀 Currently in Demo Mode (Mock Data)</span>
+            <button 
+                onClick={() => setMockMode(false)}
+                style={{
+                    background: 'white',
+                    border: 'none',
+                    color: DS.Color.Accent.Surface,
+                    padding: '2px 10px',
+                    borderRadius: '4px',
+                    fontSize: '10px',
+                    cursor: 'pointer',
+                    fontWeight: 700
+                }}
+            >
+                Exit Demo Mode
+            </button>
+        </div>
+    );
+};
+
 const AppLayout: React.FC = () => {
   const { user } = useAuth();
   
@@ -247,6 +268,7 @@ const AppLayout: React.FC = () => {
       overflowX: 'hidden',
       transition: 'background-color 0.6s cubic-bezier(0.22, 1, 0.36, 1), color 0.6s cubic-bezier(0.22, 1, 0.36, 1)'
     }}>
+      <DemoModeBanner />
       <ConnectionErrorBanner />
       <NotificationContainer />
       <AnimatedRoutes />
@@ -260,9 +282,13 @@ const App: React.FC = () => {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <Router>
-          <AppLayout />
-        </Router>
+        <NotificationProvider>
+          <ModalProvider>
+            <Router>
+              <AppLayout />
+            </Router>
+          </ModalProvider>
+        </NotificationProvider>
       </AuthProvider>
     </ThemeProvider>
   );

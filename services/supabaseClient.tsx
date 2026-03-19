@@ -204,7 +204,7 @@ export const api = {
           }
       });
 
-      // Fallback: Direct insert into notifications table
+      // 2. Direct DB Insert (Persistence & Truth)
       try {
           // Note: We omit media_url from DB insert as it might not be in the schema
           const { error } = await supabase.from('notifications').insert({
@@ -476,12 +476,10 @@ export const api = {
   // --- Feed & Posts ---
   getFeed: async (): Promise<Post[]> => {
     const { data: { user } } = await supabase.auth.getUser();
-    console.log('Feed: User:', user?.id);
 
     const fetchFeed = async () => {
         try {
             const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000));
-            console.log('Feed: Fetching posts...');
             const { data, error } = await Promise.race([
                 supabase
                 .from('posts')
@@ -495,13 +493,10 @@ export const api = {
                 timeout
             ]) as any;
             if (error) {
-                console.error('Feed: Error fetching posts:', error);
                 handleSupabaseError(error);
             }
-            console.log('Feed: Posts fetched:', data?.length);
             return data || [];
         } catch (e: any) {
-            console.error('Feed: Fetch error:', e);
             if ((isDefaultUrl || IS_MOCK_MODE) && (e.message?.includes('Unable to connect') || e.isDefaultUrlError || e.message === 'timeout')) {
                 console.warn('Feed: Using demo posts fallback');
                 return MOCK_POSTS;

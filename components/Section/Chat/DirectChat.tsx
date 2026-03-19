@@ -49,23 +49,16 @@ export const DirectChat: React.FC<DirectChatProps> = ({ friendId }) => {
             if (ignore) return;
             setFriendProfile(friend);
 
-            // Subscribe to DM updates via broadcast
-            const channelName = `dm-${[currentUser.id, friendId].sort().join('-')}`;
-            channel = supabase.channel(channelName)
-               .on('broadcast', { event: 'new_message' }, payload => {
-                   const msgRaw = payload.payload;
-                   const msg = parseMessageContent(msgRaw);
-                   
-                   // Only add incoming messages from the friend. My own messages are added optimistically.
-                   if (msg.sender_id === friendId && msg.receiver_id === currentUser.id) {
-                        setMessages(prev => {
-                           // Still good to keep the duplicate check for other race conditions
-                           if (prev.find(m => m.id === msg.id)) return prev;
-                           return [...prev, msg];
-                        });
-                   }
-               })
-               .subscribe();
+            // Subscribe to DM updates via centralized API
+            channel = api.subscribeToMessages(currentUser.id, friendId, (msg) => {
+                console.log("DirectChat: New message from real-time stream", msg);
+                if (ignore) return;
+                
+                setMessages(prev => {
+                    if (prev.find(m => m.id === msg.id)) return prev;
+                    return [...prev, msg];
+                });
+            });
         };
 
         init();
@@ -142,6 +135,7 @@ export const DirectChat: React.FC<DirectChatProps> = ({ friendId }) => {
                             msg={msg} 
                             isMe={msg.sender_id === currentUser?.id} 
                             onImageClick={(url) => setLightboxSrc(url)}
+                            senderAvatar={friendProfile?.avatar_url}
                         />
                     ))}
                     <div ref={messagesEndRef} style={{ height: '1px' }} />

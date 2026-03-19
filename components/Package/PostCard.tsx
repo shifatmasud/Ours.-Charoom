@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Heart, ChatCircle, PaperPlaneTilt, PaperPlaneRight, WarningCircle, Check, Trash } from '@phosphor-icons/react';
 import { Avatar } from '../Core/Avatar';
@@ -7,7 +7,7 @@ import { Button } from '../Core/Button';
 import { ParticleBurst } from '../Core/ParticleBurst';
 import { SlotCounter } from '../Core/SlotCounter';
 import { Post, CurrentUser, Comment } from '../../types';
-import { api } from '../../services/supabaseClient';
+import { api, supabase } from '../../services/supabaseClient';
 import { Link, useNavigate } from 'react-router-dom';
 import { DS } from '../../Theme';
 import { formatDistanceToNow } from 'date-fns';
@@ -37,6 +37,59 @@ export const PostCard: React.FC<PostCardProps> = ({ post, currentUser }) => {
   const [isShared, setIsShared] = useState(false);
   const [isDeleted, setIsDeleted] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [commentsCount, setCommentsCount] = useState(post.comments_count || 0);
+
+  useEffect(() => {
+    let mounted = true;
+    const channel = api.subscribeToPostInteractions(
+        post.id,
+        (payload) => {
+            if (!mounted) return;
+            if (payload.eventType === 'INSERT') {
+                setLikesCount(prev => prev + 1);
+                if (payload.new.user_id === currentUser?.id) {
+                    setIsLiked(true);
+                }
+            } else if (payload.eventType === 'DELETE') {
+                setLikesCount(prev => Math.max(0, prev - 1));
+                if (payload.old.user_id === currentUser?.id) {
+                    setIsLiked(false);
+                }
+            }
+        },
+        async (payload) => {
+            if (!mounted) return;
+            if (payload.eventType === 'INSERT') {
+                setCommentsCount(prev => prev + 1);
+                // If comments are already loaded, add the new one
+                if (showComments) {
+                    // Fetch full comment with profile
+                    const { data } = await supabase
+                        .from('comments')
+                        .select('*, profile:user_id(*)')
+                        .eq('id', payload.new.id)
+                        .single();
+                    if (data && mounted) {
+                        setComments(prev => {
+                            if (prev.find(c => c.id === data.id)) return prev;
+                            return [...prev, data];
+                        });
+                    }
+                }
+            } else if (payload.eventType === 'DELETE') {
+                setCommentsCount(prev => Math.max(0, prev - 1));
+                if (showComments) {
+                    setComments(prev => prev.filter(c => c.id !== payload.old.id));
+                }
+            }
+        }
+    );
+
+    return () => {
+        mounted = false;
+        supabase.removeChannel(channel);
+    };
+  }, [post.id, currentUser, showComments]);
 
   const canDelete = currentUser?.is_admin || (currentUser && currentUser.id === post.user_id);
 
@@ -282,7 +335,7 @@ export const PostCard: React.FC<PostCardProps> = ({ post, currentUser }) => {
 
                <Button variant="ghost" size="sm" onClick={toggleComments}>
                   <ChatCircle size={22} />
-                  <SlotCounter value={comments.length || post.comments_count || 0} />
+                  <SlotCounter value={commentsCount} />
                </Button>
 
                <Button variant="ghost" size="icon" onClick={handleShare}>

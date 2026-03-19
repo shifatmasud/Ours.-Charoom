@@ -2,6 +2,8 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { api, supabase } from '../services/supabaseClient';
 import { CurrentUser } from '../types';
+import { auth } from '../firebase';
+import { signInAnonymously } from 'firebase/auth';
 
 interface AuthContextType {
   user: CurrentUser | null;
@@ -118,6 +120,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const initAuth = async () => {
       console.log('Auth: Initializing...');
       try {
+        // Sign in to Firebase anonymously to enable Firestore rules
+        // This ensures request.auth is populated in firestore.rules
+        await signInAnonymously(auth).catch(e => console.warn("Firebase anonymous sign-in failed", e));
+
         // Safety timeout: if auth doesn't resolve in 5 seconds, stop loading
         authTimeout = setTimeout(() => {
           if (mounted) {

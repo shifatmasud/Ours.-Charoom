@@ -73,38 +73,35 @@ const NotificationContainer = () => {
     useEffect(() => {
         if (!lastActivity) return;
         
+        console.log("NotificationContainer: Processing lastActivity", lastActivity.id, lastActivity.type);
         const { type, sender_profile, receiver_profile, user_id, sender_id, media_url } = lastActivity;
         
-        // Skip toast for own actions to avoid self-spam
-        if (user && sender_id === user.id) return;
+        // Allow toasts for own actions during development/testing to confirm it works
+        // In production, you might want to skip own actions except for 'post'
+        // if (user && sender_id === user.id && type !== 'post') return;
 
-        const senderName = sender_profile?.username || 'Someone';
+        const senderName = sender_profile?.username || (lastActivity as any).sender_username || 'Someone';
         const receiverName = user && user_id === user.id ? 'your' : `${receiver_profile?.username || 'someone'}'s`;
         const receiverNameFollow = user && user_id === user.id ? 'you' : (receiver_profile?.username || 'someone');
 
         let msg = "";
-        let icon = null;
         
         if(type === 'like') {
             msg = `${senderName} liked ${receiverName} moment`;
-        }
-        if(type === 'comment') {
+        } else if(type === 'comment') {
             msg = `${senderName} commented on ${receiverName} moment`;
-        }
-        if(type === 'follow') {
+        } else if(type === 'follow') {
             msg = `${senderName} started following ${receiverNameFollow}`;
-        }
-        if(type === 'message') {
+        } else if(type === 'message') {
             msg = `${senderName} sent a message`;
-        }
-        if(type === 'post') {
+        } else if(type === 'post') {
             msg = `${senderName} shared a new moment`;
-        }
-        if(type === 'call') {
+        } else if(type === 'call') {
             msg = `${senderName} started a call`;
         }
         
         if (msg) {
+            console.log("NotificationContainer: Setting toast", msg);
             setToast({ message: msg, visible: true, mediaUrl: media_url });
         }
     }, [lastActivity?.id, user?.id]);

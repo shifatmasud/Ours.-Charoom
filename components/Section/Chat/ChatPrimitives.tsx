@@ -63,7 +63,8 @@ export const MessageBubble: React.FC<{
     msg: Message;
     isMe: boolean;
     onImageClick: (url: string) => void;
-}> = ({ msg, isMe, onImageClick }) => {
+    senderAvatar?: string;
+}> = ({ msg, isMe, onImageClick, senderAvatar }) => {
     // Determine padding based on content type to ensure components fit flush if needed
     const p = msg.type === 'image' || msg.type === 'audio' ? '4px' : '12px 16px';
 
@@ -78,38 +79,47 @@ export const MessageBubble: React.FC<{
             marginBottom: '8px',
           }}
         >
-          <div 
-            style={{ 
-              maxWidth: '85%', 
-              padding: p, 
-              fontSize: '15px', 
-              background: isMe ? theme.colors.surface2 : theme.colors.surface3,
-              color: theme.colors.text1,
-              borderRadius: theme.radius.lg,
-              borderBottomRightRadius: isMe ? '4px' : theme.radius.lg,
-              borderBottomLeftRadius: isMe ? theme.radius.lg : '4px',
-              boxShadow: theme.shadow.card,
-              overflow: 'hidden'
-            }}
-          >
-            {msg.type === 'image' && msg.media_url ? (
-                <img 
-                  src={msg.media_url} 
-                  alt="attachment" 
-                  onClick={() => onImageClick(msg.media_url || '')}
-                  style={{ width: '100%', maxWidth: '240px', borderRadius: theme.radius.md, display: 'block', cursor: 'pointer' }} 
-                />
-            ) : msg.type === 'audio' ? (
-                <AudioPlayer src={msg.media_url || ''} />
-            ) : (
-                msg.content
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: '8px', flexDirection: isMe ? 'row-reverse' : 'row' }}>
+            {!isMe && (
+                <div style={{ width: '24px', height: '24px', borderRadius: '50%', overflow: 'hidden', flexShrink: 0, marginBottom: '4px' }}>
+                    <img 
+                        src={senderAvatar || `https://ui-avatars.com/api/?name=H&background=random`} 
+                        alt="avatar" 
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
+                    />
+                </div>
             )}
+            <div 
+                style={{ 
+                maxWidth: '85%', 
+                padding: p, 
+                fontSize: '15px', 
+                background: isMe ? theme.colors.surface2 : theme.colors.surface3,
+                color: theme.colors.text1,
+                borderRadius: theme.radius.lg,
+                borderBottomRightRadius: isMe ? '4px' : theme.radius.lg,
+                borderBottomLeftRadius: isMe ? theme.radius.lg : '4px',
+                boxShadow: theme.shadow.card,
+                overflow: 'hidden'
+                }}
+            >
+                {msg.type === 'image' && msg.media_url ? (
+                    <img 
+                    src={msg.media_url} 
+                    alt="attachment" 
+                    onClick={() => onImageClick(msg.media_url || '')}
+                    style={{ width: '100%', maxWidth: '240px', borderRadius: theme.radius.md, display: 'block', cursor: 'pointer' }} 
+                    />
+                ) : msg.type === 'audio' ? (
+                    <AudioPlayer src={msg.media_url || ''} />
+                ) : (
+                    msg.content
+                )}
+            </div>
           </div>
-          {!isMe && (
-              <span style={{ fontSize: '10px', color: theme.colors.text3, marginTop: '4px', marginLeft: '4px' }}>
-                  {msg.sender_id.slice(0, 8)}...
-              </span>
-          )}
+          <span style={{ fontSize: '10px', color: theme.colors.text3, marginTop: '4px', marginLeft: isMe ? '0' : '36px', marginRight: isMe ? '4px' : '0' }}>
+              {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </span>
         </motion.div>
     );
 };

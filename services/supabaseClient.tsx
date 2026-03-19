@@ -10,6 +10,48 @@ const SUPABASE_URL = RAW_URL.endsWith('/') ? RAW_URL.slice(0, -1) : RAW_URL;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxlenZla3BmbHFieG9ybmVmYndoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM3MDM1OTEsImV4cCI6MjA3OTI3OTU5MX0._fN9MxAivt_GyYv81lR7VJUShAPnYQ5txynHxwyrftw';
 
 const isDefaultUrl = SUPABASE_URL === DEFAULT_URL;
+const IS_MOCK_MODE = typeof window !== 'undefined' && localStorage.getItem('supabase_mock_mode') === 'true';
+
+// --- Mock Data ---
+const MOCK_USER: CurrentUser = {
+    id: 'mock-user-id',
+    username: 'demo_user',
+    full_name: 'Demo User',
+    avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=demo',
+    bio: 'This is a demo account because the default Supabase project is unreachable.',
+    followers_count: 42,
+    following_count: 12
+};
+
+const MOCK_POSTS: Post[] = [
+    {
+        id: 'mock-post-1',
+        user_id: 'mock-user-id',
+        image_url: 'https://picsum.photos/seed/demo1/600/600',
+        caption: 'Welcome to the demo mode! The backend is currently unreachable, so we are showing some sample data.',
+        created_at: new Date().toISOString(),
+        profiles: MOCK_USER,
+        likes_count: 10,
+        comments_count: 2,
+        has_liked: false
+    },
+    {
+        id: 'mock-post-2',
+        user_id: 'other-user-id',
+        image_url: 'https://picsum.photos/seed/demo2/600/600',
+        caption: 'You can still explore the UI and see how everything looks.',
+        created_at: new Date(Date.now() - 3600000).toISOString(),
+        profiles: {
+            id: 'other-user-id',
+            username: 'traveler',
+            full_name: 'World Traveler',
+            avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=traveler'
+        },
+        likes_count: 25,
+        comments_count: 5,
+        has_liked: true
+    }
+];
 
 // Helper to handle "Failed to fetch" errors consistently
 const isConnectionError = (err: any) => {
@@ -25,7 +67,7 @@ const isConnectionError = (err: any) => {
 const handleSupabaseError = (err: any) => {
   if (isConnectionError(err)) {
     if (isDefaultUrl) {
-        const msg = 'Unable to connect to the default Supabase project. Please configure your own Supabase project in the Settings menu.';
+        const msg = 'Unable to connect to the default Supabase project. Showing demo data for preview...';
         const error = new Error(msg) as any;
         error.isDefaultUrlError = true;
         error.silent = true;
@@ -91,6 +133,7 @@ export const api = {
         supabase
           .from('notifications')
           .select('*, sender_profile:profiles!sender_id(*), receiver_profile:profiles!user_id(*)')
+          .eq('user_id', userId)
           .order('created_at', { ascending: false })
           .limit(50),
         timeout
@@ -161,20 +204,45 @@ export const api = {
           }
       });
 
-      // 2. Direct DB Insert (Persistence & Truth)
+      // 2. Edge Function (Persistence & Truth)
       try {
-          // Note: We omit media_url and sender_username from DB insert as they are not in the schema.
-          // The receiver will fetch these via joins (sender_profile) or they will be passed via the optimistic broadcast.
-          const { error } = await supabase.from('notifications').insert({
-              user_id: userId,
-              sender_id: senderId,
-              type,
-              reference_id: dbReferenceId,
-              is_read: false
+          const response = await fetch(`${SUPABASE_URL}/functions/v1/send-notification`, {
+              method: 'POST',
+              headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${SUPABASE_KEY}`
+              },
+              body: JSON.stringify({ 
+                  user_id: userId, 
+                  sender_id: senderId, 
+                  type, 
+                  reference_id: dbReferenceId, 
+                  data: {
+                      media_url: mediaUrl,
+                      sender_username: senderUsername
+                  }
+              })
           });
-          if (error) throw error;
-      } catch (dbErr: any) {
-          console.error("Direct notification insert failed:", dbErr.message, dbErr.details, dbErr.hint);
+
+          if (!response.ok) {
+              throw new Error(`Edge Function returned ${response.status}`);
+          }
+      } catch (e: any) {
+          console.warn("Edge Function failed, falling back to direct DB insert", e);
+          // Fallback: Direct insert into notifications table
+          try {
+              // Note: We omit media_url from DB insert as it might not be in the schema
+              const { error } = await supabase.from('notifications').insert({
+                  user_id: userId,
+                  sender_id: senderId,
+                  type,
+                  reference_id: dbReferenceId,
+                  is_read: false
+              });
+              if (error) throw error;
+          } catch (dbErr: any) {
+              console.error("Direct notification insert failed:", dbErr.message, dbErr.details, dbErr.hint);
+          }
       }
   },
 
@@ -240,6 +308,22 @@ export const api = {
         if (!user) {
             const { data: authData, error: authError } = await supabase.auth.getUser();
             if (authError || !authData?.user) {
+                // If no user is logged in, and we are explicitly in mock mode, show mock user
+                if (IS_MOCK_MODE) return MOCK_USER;
+                // If on default URL and unreachable, show mock user
+                if (isDefaultUrl) {
+                    try {
+                        // Quick check if reachable with timeout
+                        const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000));
+                        await Promise.race([
+                            supabase.from('profiles').select('id').limit(1),
+                            timeout
+                        ]);
+                    } catch (e) {
+                        console.warn('Auth: Default Supabase project unreachable, using mock user');
+                        return MOCK_USER;
+                    }
+                }
                 throw authError || new Error('No user logged in');
             }
             user = authData.user;
@@ -305,6 +389,10 @@ export const api = {
             following_count: followingCount
         };
     } catch (err: any) {
+        if (IS_MOCK_MODE || (isDefaultUrl && isConnectionError(err))) {
+            console.warn('Auth: Default project unreachable or mock mode, using mock user');
+            return MOCK_USER;
+        }
         throw err;
     }
   },
@@ -358,6 +446,9 @@ export const api = {
         ]) as any;
         
         if (error) {
+            if ((IS_MOCK_MODE || isDefaultUrl) && (error.message?.includes('Failed to fetch') || error.code === 'PGRST116')) {
+                return MOCK_USER;
+            }
             throw error;
         }
 
@@ -398,6 +489,7 @@ export const api = {
             following_count: followingCount 
         };
     } catch (err) {
+        if (IS_MOCK_MODE || (isDefaultUrl && isConnectionError(err))) return MOCK_USER;
         throw err;
     }
   },
@@ -431,11 +523,21 @@ export const api = {
             }
             return data || [];
         } catch (e: any) {
+            if ((isDefaultUrl || IS_MOCK_MODE) && (e.message?.includes('Unable to connect') || e.isDefaultUrlError || e.message === 'timeout')) {
+                console.warn('Feed: Using demo posts fallback');
+                return MOCK_POSTS;
+            }
             throw e;
         }
     };
 
     const data = await fetchFeed();
+    
+    // If we got real data but it's empty, and we're on default URL, maybe show demo posts
+    // but only if the user isn't logged in or has no posts.
+    if (data.length === 0 && isDefaultUrl && !user) {
+        return MOCK_POSTS;
+    }
     
     // Batch fetch 'has_liked' status for the current user
     let likedPostIds = new Set<string>();
@@ -514,6 +616,9 @@ export const api = {
             .order('created_at', { ascending: false });
         
         if (error) {
+            if ((IS_MOCK_MODE || (isDefaultUrl && isConnectionError(error))) && error.message?.includes('Failed to fetch')) {
+                return userId === MOCK_USER.id ? MOCK_POSTS : [];
+            }
             throw error;
         }
         
@@ -525,6 +630,9 @@ export const api = {
             has_liked: false // Will be updated by the component if needed
         }));
     } catch (err) {
+        if (IS_MOCK_MODE || isDefaultUrl) {
+            return userId === MOCK_USER.id ? MOCK_POSTS : [];
+        }
         throw err;
     }
   },
@@ -565,6 +673,9 @@ export const api = {
 
   // --- Comments ---
   getComments: async (postId: string): Promise<Comment[]> => {
+    if (IS_MOCK_MODE) return [
+        { id: 'c1', post_id: postId, user_id: 'other', content: 'This looks amazing!', created_at: new Date().toISOString(), profile: { username: 'fan_1', avatar_url: '' } }
+    ] as any;
     const { data } = await supabase.from('comments').select('*, profile:user_id(*)').eq('post_id', postId).order('created_at', { ascending: true });
     return data || [];
   },
@@ -596,6 +707,9 @@ export const api = {
 
   // --- Messaging ---
   getMessages: async (friendId: string): Promise<Message[]> => {
+      if (IS_MOCK_MODE) return [
+          { id: 'm1', sender_id: friendId, receiver_id: 'me', content: 'Hey! This is a demo message.', created_at: new Date().toISOString(), type: 'text' }
+      ] as any;
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return [];
 

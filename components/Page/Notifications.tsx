@@ -1,21 +1,50 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { api } from '../../services/supabaseClient';
 import { Notification } from '../../types';
 import { DS } from '../../Theme';
-import { Check, Heart, ChatCircle, UserPlus, Phone, ChatCircleText } from '@phosphor-icons/react';
+import { Check, Heart, ChatCircle, UserPlus } from '@phosphor-icons/react';
 import { Link } from 'react-router-dom';
-import { useNotifications } from '../../contexts/NotificationContext';
+import { useAuth } from '../../contexts/AuthContext';
 
 export const NotificationsPage: React.FC = () => {
-  const { notifications, markAsRead } = useNotifications();
+  const { user } = useAuth();
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (user) {
+      fetchNotifications();
+    }
+  }, [user?.id]);
+
+  const fetchNotifications = async () => {
+    if (!user) return;
+    setLoading(true);
+    try {
+      const data = await api.getNotifications(user.id);
+      setNotifications(data);
+    } catch (e) {
+      console.error("Failed to fetch notifications", e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const markAsRead = async (notifId: string) => {
+    try {
+      await api.markNotificationAsRead(notifId);
+      setNotifications(prev => prev.map(n => n.id === notifId ? { ...n, is_read: true } : n));
+    } catch (e) {
+      console.error("Failed to mark notification read", e);
+    }
+  };
 
   const getIcon = (type: string) => {
     switch (type) {
       case 'like': return <Heart size={20} color={DS.Color.Status.Error} />;
       case 'comment': return <ChatCircle size={20} color={DS.Color.Accent.Surface} />;
       case 'follow': return <UserPlus size={20} color={DS.Color.Base.Content[1]} />;
-      case 'call': return <Phone size={20} color={DS.Color.Accent.Surface} />;
-      case 'message': return <ChatCircleText size={20} color={DS.Color.Accent.Surface} />;
       default: return null;
     }
   };
@@ -24,7 +53,9 @@ export const NotificationsPage: React.FC = () => {
     <div style={{ padding: '24px', maxWidth: '600px', margin: '0 auto' }}>
       <h1 style={{ ...DS.Type.Expressive.Display, marginBottom: '24px' }}>Notifications</h1>
       
-      {notifications.length === 0 ? (
+      {loading ? (
+        <div style={{ color: DS.Color.Base.Content[3] }}>Loading...</div>
+      ) : notifications.length === 0 ? (
         <div style={{ color: DS.Color.Base.Content[3] }}>No new notifications.</div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
@@ -48,52 +79,12 @@ export const NotificationsPage: React.FC = () => {
                 {getIcon(notif.type)}
                 <div style={{ flex: 1, fontSize: '14px', color: DS.Color.Base.Content[1] }}>
                   <Link to={`/profile/${notif.sender_id}`} style={{ fontWeight: 600, color: 'inherit', textDecoration: 'none' }}>
-                    {notif.sender_profile?.username || 'Someone'}
+                    {notif.sender_profile?.username}
                   </Link>
                   {' '}
                   {notif.type === 'like' && 'liked your post'}
                   {notif.type === 'comment' && 'commented on your post'}
                   {notif.type === 'follow' && 'followed you'}
-                  {notif.type === 'message' && (
-                    <>
-                      sent you a message
-                      <Link 
-                        to={`/messages/${notif.sender_id}`} 
-                        style={{ 
-                          marginLeft: '12px', 
-                          padding: '4px 12px', 
-                          background: 'rgba(255,255,255,0.1)', 
-                          color: DS.Color.Base.Content[1], 
-                          borderRadius: '8px', 
-                          textDecoration: 'none',
-                          fontSize: '12px',
-                          fontWeight: 600
-                        }}
-                      >
-                        REPLY
-                      </Link>
-                    </>
-                  )}
-                  {notif.type === 'call' && (
-                    <>
-                      is calling you
-                      <Link 
-                        to={`/call/${notif.reference_id}`} 
-                        style={{ 
-                          marginLeft: '12px', 
-                          padding: '4px 12px', 
-                          background: DS.Color.Accent.Surface, 
-                          color: '#fff', 
-                          borderRadius: '8px', 
-                          textDecoration: 'none',
-                          fontSize: '12px',
-                          fontWeight: 600
-                        }}
-                      >
-                        JOIN
-                      </Link>
-                    </>
-                  )}
                 </div>
                 {!notif.is_read && (
                   <button 

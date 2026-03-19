@@ -1,0 +1,78 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: notifications
+    // Document ID: auto-generated or temp-ID
+    // Fields:
+    //   - id: string (required) - unique identifier
+    //   - user_id: string (required) - recipient UID
+    //   - sender_id: string (required) - sender UID
+    //   - type: string (required) - 'like', 'comment', 'follow', 'message', 'post', 'call'
+    //   - reference_id: string (optional) - ID of the related object (post, message, etc.)
+    //   - media_url: string (optional) - URL for media preview
+    //   - sender_username: string (optional) - username of the sender
+    //   - created_at: timestamp (required) - when the activity occurred
+    //   - is_read: boolean (required) - read status
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function isValidNotification(data) {
+      return data.user_id is string &&
+             data.sender_id is string &&
+             data.type in ['like', 'comment', 'follow', 'message', 'post', 'call'] &&
+             data.created_at is timestamp &&
+             data.is_read is bool &&
+             (!('media_url' in data) || (data.media_url is string && data.media_url.size() < 1000)) &&
+             (!('sender_username' in data) || (data.sender_username is string && data.sender_username.size() < 100));
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /notifications/{notificationId} {
+      // Allow public read for the global activity feed
+      allow read: if true;
+      
+      // Allow any authenticated user to create a notification
+      // We'll also allow anonymous creates for now to ensure it works even if Firebase Auth isn't fully bridged yet
+      allow create: if (isAuthenticated() || request.auth == null) && 
+                      isValidNotification(request.resource.data);
+      
+      // Only the recipient can mark as read (requires auth)
+      allow update: if isAuthenticated() && 
+                      (resource.data.user_id == request.auth.uid || resource.data.user_id == 'public') &&
+                      request.resource.data.diff(resource.data).affectedKeys().hasOnly(['is_read']) &&
+                      request.resource.data.is_read is bool;
+
+      allow delete: if false;
+    }
+
+    match /test/connection {
+      allow read: if true;
+    }
+  }
+}

@@ -17,6 +17,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useNotifications } from '../../contexts/NotificationContext';
 
 export const Feed: React.FC = () => {
+  console.log('Feed: Rendering');
   const { user: currentUser } = useAuth();
   const { unreadCount } = useNotifications();
   const { mode, toggleTheme } = useTheme();

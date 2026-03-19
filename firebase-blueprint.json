@@ -1,0 +1,27 @@
+{
+  "entities": {
+    "Notification": {
+      "title": "Notification",
+      "description": "A notification or activity record.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "user_id": { "type": "string", "description": "Recipient of the notification" },
+        "sender_id": { "type": "string", "description": "Sender of the notification" },
+        "type": { "type": "string", "enum": ["like", "comment", "follow", "message", "post", "call"] },
+        "reference_id": { "type": "string" },
+        "media_url": { "type": "string" },
+        "sender_username": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "is_read": { "type": "boolean" }
+      },
+      "required": ["user_id", "sender_id", "type", "created_at"]
+    }
+  },
+  "firestore": {
+    "notifications": {
+      "schema": "Notification",
+      "description": "Collection of all notifications and activities"
+    }
+  }
+}

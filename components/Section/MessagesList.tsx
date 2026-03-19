@@ -1,7 +1,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api } from '../../services/supabaseClient';
+import { api, supabase } from '../../services/supabaseClient';
 import { Profile, Message } from '../../types';
 import { MagnifyingGlass } from '@phosphor-icons/react';
 import { Avatar } from '../Core/Avatar';
@@ -23,11 +23,15 @@ export const MessagesList: React.FC = () => {
   const [progress, setProgress] = useState(0);
 
   useEffect(() => {
+    let mounted = true;
+    let channel: any = null;
+
     const loadUsers = async () => {
       if (!currentUser) return;
       try {
         setProgress(20);
         const data = await api.getAllProfiles();
+        if (!mounted) return;
         setProgress(60);
         
         // Filter out current user
@@ -35,6 +39,7 @@ export const MessagesList: React.FC = () => {
 
         // Fetch all recent conversations in one go
         const recentMessages = await api.getRecentConversations();
+        if (!mounted) return;
         setProgress(90);
 
         const profilesWithMessages = others.map(profile => {
@@ -51,12 +56,39 @@ export const MessagesList: React.FC = () => {
         setProfiles(profilesWithMessages);
         setProgress(100);
         setLoading(false);
+
+        // Subscribe to all incoming/outgoing messages for current user
+        channel = api.subscribeToUserMessages(currentUser.id, (msg) => {
+            if (!mounted) return;
+            setProfiles(prev => {
+                const otherId = msg.sender_id === currentUser.id ? msg.receiver_id : msg.sender_id;
+                const updated = prev.map(p => {
+                    if (p.id === otherId) {
+                        return { ...p, lastMessage: msg };
+                    }
+                    return p;
+                });
+                
+                // Re-sort
+                return [...updated].sort((a, b) => {
+                    const timeA = a.lastMessage ? new Date(a.lastMessage.created_at).getTime() : 0;
+                    const timeB = b.lastMessage ? new Date(b.lastMessage.created_at).getTime() : 0;
+                    return timeB - timeA;
+                });
+            });
+        });
+
       } catch (e) {
         console.error(e);
-        setLoading(false);
+        if (mounted) setLoading(false);
       }
     };
     loadUsers();
+
+    return () => {
+        mounted = false;
+        if (channel) supabase.removeChannel(channel);
+    };
   }, [currentUser]);
 
   const filteredProfiles = profiles.filter(p => 

@@ -164,119 +164,90 @@ export const Profile: React.FC = () => {
       <div style={{ width: '100%', maxWidth: theme.layout.maxWidth, paddingBottom: '180px' }}>
         
         {/* Back Button */}
-        <div style={{ padding: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-             <button onClick={() => navigate(-1)} style={{ background: 'none', border: 'none', color: theme.colors.text1, display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', ...DS.Type.Readable.Label, fontSize: '13px' }}>
-               <CaretLeft size={20} weight="bold" /> BACK
+        <div style={{ padding: '32px 24px 0 24px', display: 'flex', justifyContent: 'flex-start', alignItems: 'center' }}>
+             <button 
+               onClick={() => navigate(-1)} 
+               style={{ 
+                 background: 'none', 
+                 border: 'none', 
+                 color: theme.colors.text1, 
+                 display: 'flex', 
+                 alignItems: 'center', 
+                 cursor: 'pointer', 
+                 opacity: 0.4,
+                 transition: 'opacity 0.2s'
+               }}
+               onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
+               onMouseLeave={(e) => e.currentTarget.style.opacity = '0.4'}
+             >
+               <CaretLeft size={20} weight="bold" />
              </button>
-             {isMyProfile && (
-               <button 
-                 onClick={() => api.signOut()}
-                 style={{ 
-                   background: 'none', 
-                   border: 'none', 
-                   color: theme.colors.danger, 
-                   cursor: 'pointer',
-                   display: 'flex',
-                   alignItems: 'center',
-                   gap: '6px',
-                   ...DS.Type.Readable.Label,
-                   fontSize: '12px'
-                 }}
-               >
-                 <SignOut size={18} weight="bold" /> LOGOUT
-               </button>
-             )}
         </div>
 
         {/* Profile Header */}
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '0 24px 48px 24px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '0 24px 40px 24px' }}>
             
-            <div style={{ position: 'relative', marginBottom: '32px' }}>
-              <Avatar src={profileUser.avatar_url} alt={profileUser.username} size="xl" bordered style={{ width: '120px', height: '120px' }} />
-              {isMyProfile && (
-                <motion.button
-                  whileHover={{ scale: 1.1 }}
-                  whileTap={{ scale: 0.9 }}
-                  onClick={() => setIsEditing(true)}
-                  style={{
-                    position: 'absolute',
-                    bottom: 0,
-                    right: 0,
-                    background: theme.colors.accent,
-                    color: 'white',
-                    border: `4px solid ${theme.colors.surface1}`,
-                    borderRadius: '50%',
-                    width: '36px',
-                    height: '36px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    cursor: 'pointer',
-                    boxShadow: theme.shadow.soft
-                  }}
-                >
-                  <Camera size={18} weight="fill" />
-                </motion.button>
-              )}
+            <div style={{ position: 'relative', marginBottom: '24px' }}>
+              <Avatar src={profileUser.avatar_url} alt={profileUser.username} size="xl" style={{ width: '110px', height: '110px' }} />
             </div>
             
             {/* User Info */}
-            <div style={{ textAlign: 'center', marginBottom: '32px' }}>
+            <div style={{ textAlign: 'center', marginBottom: '24px' }}>
               <h1 style={{ 
-                ...DS.Type.Expressive.Display, 
-                fontSize: '32px', 
-                marginBottom: '8px', 
+                ...DS.Type.Readable.Label,
+                fontSize: '24px', 
+                fontWeight: 700,
+                marginBottom: '4px', 
                 color: theme.colors.text1,
-                textTransform: 'uppercase'
+                letterSpacing: '-0.02em'
               }}>
                 {profileUser.full_name || profileUser.username}
               </h1>
               <p style={{ 
                 ...DS.Type.Readable.Body,
                 color: theme.colors.text2, 
-                fontSize: '14px',
-                maxWidth: '300px',
+                fontSize: '13px',
+                maxWidth: '280px',
                 margin: '0 auto',
-                opacity: 0.8
+                opacity: 0.7,
+                lineHeight: '1.4'
               }}>
-                {profileUser.bio || "Just floating in the void."}
+                {profileUser.bio || ""}
               </p>
             </div>
 
-            {/* Stats */}
+            {/* Stats - Ultra Minimalist */}
             <div 
               style={{ 
                 display: 'flex', 
-                gap: '48px', 
+                gap: '40px', 
                 marginBottom: '40px',
-                padding: '20px 40px',
-                background: theme.colors.surface2,
-                borderRadius: theme.radius.xl,
-                border: `1px solid ${theme.colors.border}`
+                width: '100%',
+                justifyContent: 'center'
               }}
             >
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ ...DS.Type.Expressive.Display, fontSize: '24px', color: theme.colors.text1 }}>
-                   <SlotCounter value={posts.length} fontSize="24px" />
+              <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
+                <div style={{ ...DS.Type.Readable.Label, fontSize: '18px', fontWeight: 700, color: theme.colors.text1 }}>
+                   <SlotCounter value={posts.length} fontSize="18px" fontWeight={700} />
                 </div>
-                <span style={{ fontSize: '10px', color: theme.colors.text3, textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 700 }}>Posts</span>
+                <span style={{ fontSize: '10px', color: theme.colors.text3, textTransform: 'uppercase', letterSpacing: '0.05em', opacity: 0.5 }}>posts</span>
               </div>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ ...DS.Type.Expressive.Display, fontSize: '24px', color: theme.colors.text1 }}>
-                    <SlotCounter value={profileUser.followers_count || 0} fontSize="24px" />
+              <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
+                <div style={{ ...DS.Type.Readable.Label, fontSize: '18px', fontWeight: 700, color: theme.colors.text1 }}>
+                    <SlotCounter value={profileUser.followers_count || 0} fontSize="18px" fontWeight={700} />
                 </div>
-                <span style={{ fontSize: '10px', color: theme.colors.text3, textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 700 }}>Followers</span>
+                <span style={{ fontSize: '10px', color: theme.colors.text3, textTransform: 'uppercase', letterSpacing: '0.05em', opacity: 0.5 }}>followers</span>
               </div>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ ...DS.Type.Expressive.Display, fontSize: '24px', color: theme.colors.text1 }}>
-                    <SlotCounter value={profileUser.following_count || 0} fontSize="24px" />
+              <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
+                <div style={{ ...DS.Type.Readable.Label, fontSize: '18px', fontWeight: 700, color: theme.colors.text1 }}>
+                    <SlotCounter value={profileUser.following_count || 0} fontSize="18px" fontWeight={700} />
                 </div>
-                <span style={{ fontSize: '10px', color: theme.colors.text3, textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 700 }}>Following</span>
+                <span style={{ fontSize: '10px', color: theme.colors.text3, textTransform: 'uppercase', letterSpacing: '0.05em', opacity: 0.5 }}>following</span>
               </div>
             </div>
 
             {/* Actions */}
-            <div style={{ width: '100%', maxWidth: '340px' }}>
+            <div style={{ width: '100%', maxWidth: '240px' }}>
                 {isMyProfile ? (
                   <button 
                     onClick={() => setIsEditing(true)}
@@ -285,13 +256,13 @@ export const Profile: React.FC = () => {
                       background: theme.colors.text1, 
                       color: theme.colors.surface1, 
                       padding: '14px', 
-                      borderRadius: theme.radius.full, 
+                      borderRadius: theme.radius.md, 
                       fontWeight: 700, 
-                      fontSize: '14px', 
+                      fontSize: '12px', 
                       cursor: 'pointer', 
                       border: 'none',
                       textTransform: 'uppercase',
-                      letterSpacing: '1px',
+                      letterSpacing: '0.1em',
                       transition: 'all 0.2s' 
                     }}
                   >
@@ -304,15 +275,15 @@ export const Profile: React.FC = () => {
                       style={{ 
                         flex: 1,
                         padding: '14px', 
-                        borderRadius: theme.radius.full, 
+                        borderRadius: theme.radius.md, 
                         fontWeight: 700, 
-                        fontSize: '14px', 
+                        fontSize: '12px', 
                         border: 'none', 
                         cursor: 'pointer',
                         textTransform: 'uppercase',
-                        letterSpacing: '1px',
-                        background: profileUser.is_following ? theme.colors.surface3 : theme.colors.accent,
-                        color: profileUser.is_following ? theme.colors.text1 : 'white',
+                        letterSpacing: '0.1em',
+                        background: profileUser.is_following ? theme.colors.surface2 : theme.colors.text1,
+                        color: profileUser.is_following ? theme.colors.text1 : theme.colors.surface1,
                         transition: 'all 0.2s'
                       }}
                     >
@@ -321,12 +292,12 @@ export const Profile: React.FC = () => {
                     <button 
                       onClick={handleMessage}
                       style={{ 
-                        width: '52px',
-                        height: '52px',
+                        width: '48px',
+                        height: '48px',
                         background: theme.colors.surface2, 
-                        border: `1px solid ${theme.colors.border}`, 
+                        border: 'none', 
                         color: theme.colors.text1, 
-                        borderRadius: '50%', 
+                        borderRadius: theme.radius.md, 
                         display: 'flex', 
                         alignItems: 'center', 
                         justifyContent: 'center', 
@@ -334,21 +305,21 @@ export const Profile: React.FC = () => {
                         transition: 'all 0.2s'
                       }}
                     >
-                      <ChatCircleText weight="fill" size={24} />
+                      <ChatCircleText weight="bold" size={20} />
                     </button>
                   </div>
                 )}
             </div>
         </div>
 
-        {/* Post Grid */}
-        <div style={{ padding: '0 4px' }}>
-           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '4px' }}>
+        {/* Post Grid - Seamless */}
+        <div style={{ padding: '0 1px' }}>
+           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1px' }}>
              {posts.map((post, i) => (
                <motion.div 
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: i * 0.05 }}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: i * 0.03 }}
                   key={post.id} 
                   onClick={() => navigate(`/post/${post.id}`)}
                   style={{ 
@@ -356,7 +327,6 @@ export const Profile: React.FC = () => {
                     aspectRatio: '1/1', 
                     cursor: 'pointer', 
                     overflow: 'hidden', 
-                    borderRadius: '4px',
                     backgroundColor: theme.colors.surface2 
                   }}
                >
@@ -365,18 +335,6 @@ export const Profile: React.FC = () => {
                    alt="User Post" 
                    style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
                  />
-                 <motion.div 
-                    whileHover={{ opacity: 1 }}
-                    style={{ 
-                      position: 'absolute', inset: 0, 
-                      background: 'rgba(0,0,0,0.3)', 
-                      opacity: 0, 
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      transition: 'opacity 0.2s'
-                    }}
-                 >
-                    <SquaresFour size={24} color="white" weight="fill" />
-                 </motion.div>
                </motion.div>
              ))}
            </div>
@@ -413,16 +371,15 @@ export const Profile: React.FC = () => {
                  transition={{ type: 'spring', damping: 25, stiffness: 300 }}
                  style={{ 
                    position: 'fixed', bottom: 0, left: 0, right: 0, 
-                   background: theme.colors.surface2,
+                   background: theme.colors.surface1,
                    color: theme.colors.text1,
                    borderTopLeftRadius: theme.radius.xl,
                    borderTopRightRadius: theme.radius.xl,
-                   padding: '32px 24px 48px 24px',
+                   padding: '40px 24px 48px 24px',
                    zIndex: 2001,
                    maxWidth: theme.layout.maxWidth,
                    margin: '0 auto',
-                   boxShadow: '0 -10px 40px rgba(0,0,0,0.3)',
-                   borderTop: `1px solid ${theme.colors.border}`
+                   boxShadow: '0 -10px 60px rgba(0,0,0,0.15)'
                  }}
                >
                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '32px' }}>

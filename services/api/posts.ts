@@ -154,29 +154,34 @@ export const deletePost = async (postId: string): Promise<void> => {
     await supabase.from('posts').delete().eq('id', postId);
 };
 
-export const subscribeToPostInteractions = (postId: string, onLike: (payload: any) => void, onComment: (payload: any) => void) => {
-    const channel = supabase.channel(`post-interactions-${postId}`);
-    
-    channel
-        .on('postgres_changes', { 
-            event: '*', 
-            schema: 'public', 
-            table: 'likes',
-            filter: `post_id=eq.${postId}`
-        }, (payload) => {
-            onLike(payload);
-        })
-        .on('postgres_changes', { 
-            event: '*', 
-            schema: 'public', 
-            table: 'comments',
-            filter: `post_id=eq.${postId}`
-        }, (payload) => {
-            onComment(payload);
-        })
+export const subscribeToPostInteractions = (
+    postId: string,
+    onLike: (payload: any) => void,
+    onComment: (payload: any) => void
+) => {
+    return supabase
+        .channel(`post-interactions-${postId}`)
+        .on(
+            'postgres_changes',
+            {
+                event: '*',
+                schema: 'public',
+                table: 'likes',
+                filter: `post_id=eq.${postId}`,
+            },
+            onLike
+        )
+        .on(
+            'postgres_changes',
+            {
+                event: '*',
+                schema: 'public',
+                table: 'comments',
+                filter: `post_id=eq.${postId}`,
+            },
+            onComment
+        )
         .subscribe();
-
-    return channel;
 };
 
 export const likePost = async (postId: string, userId: string, ownerId: string, senderUsername?: string, mediaUrl?: string): Promise<void> => {

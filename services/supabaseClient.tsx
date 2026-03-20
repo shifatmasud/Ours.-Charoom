@@ -152,6 +152,7 @@ export const api = {
   createPost,
   deletePost,
   likePost,
+  subscribeToPostInteractions,
   getComments,
   addComment,
   deleteComment,
@@ -163,6 +164,5 @@ export const api = {
   sendMessage,
   subscribeToMessages,
   subscribeToUserMessages,
-  subscribeToPostInteractions,
   uploadFile
 };

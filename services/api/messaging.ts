@@ -94,32 +94,34 @@ export const sendMessage = async (senderId: string, receiverId: string, content:
     return parseMessageContent(data);
 };
 
-export const subscribeToMessages = (userId: string, friendId: string, callback: (msg: Message) => void) => {
+export const subscribeToMessages = (userId: string, friendId: string, onNewMessage: (msg: Message) => void) => {
     const channelName = friendId === 'codex' ? 'public-codex-chat' : `dm-${[userId, friendId].sort().join('-')}`;
-    const channel = supabase.channel(channelName);
-    
-    channel
-        .on('broadcast', { event: 'new_message' }, (payload) => {
-            callback(parseMessageContent(payload.payload));
-        })
+    return supabase
+        .channel(channelName)
+        .on(
+            'broadcast',
+            { event: 'new_message' },
+            (payload) => onNewMessage(parseMessageContent(payload.payload))
+        )
         .subscribe();
-
-    return channel;
 };
 
-export const subscribeToUserMessages = (userId: string, callback: (msg: Message) => void) => {
-    const channel = supabase.channel(`user-messages-${userId}`);
-    
-    channel
-        .on('postgres_changes', { 
-            event: 'INSERT', 
-            schema: 'public', 
-            table: 'messages',
-            filter: `receiver_id=eq.${userId}`
-        }, (payload) => {
-            callback(parseMessageContent(payload.new));
-        })
+export const subscribeToUserMessages = (userId: string, onNewMessage: (msg: Message) => void) => {
+    return supabase
+        .channel(`user-messages-${userId}`)
+        .on(
+            'postgres_changes',
+            {
+                event: 'INSERT',
+                schema: 'public',
+                table: 'messages'
+            },
+            (payload) => {
+                const msg = parseMessageContent(payload.new);
+                if (msg.sender_id === userId || msg.receiver_id === userId) {
+                    onNewMessage(msg);
+                }
+            }
+        )
         .subscribe();
-
-    return channel;
 };

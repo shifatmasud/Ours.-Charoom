@@ -185,7 +185,7 @@ export const Feed: React.FC = () => {
                   <Bell size={24} />
                   {unreadCount > 0 && (
                       <span style={{ 
-                          position: 'absolute', top: 6, right: 6, 
+                          position: 'absolute', top: 2, right: 2, 
                           width: '8px', height: '8px', 
                           background: DS.Color.Accent.Surface, 
                           borderRadius: '50%',

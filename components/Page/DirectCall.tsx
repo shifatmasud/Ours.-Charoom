@@ -104,9 +104,6 @@ export const DirectCall: React.FC = () => {
   const { roomId } = useParams<{ roomId: string }>();
   const navigate = useNavigate();
   
-  // Note: This component uses LiveKit for WebRTC. 
-  // LiveKit's cloud infrastructure automatically provides access to STUN and TURN servers 
-  // for reliable peer-to-peer connections.
   const roomRef = useRef<Room | null>(null);
   const [room, setRoom] = useState<Room | null>(null);
   const [remoteParticipants, setRemoteParticipants] = useState<RemoteParticipant[]>([]);

@@ -17,7 +17,6 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useNotifications } from '../../contexts/NotificationContext';
 
 export const Feed: React.FC = () => {
-  console.log('Feed: Rendering');
   const { user: currentUser } = useAuth();
   const { unreadCount } = useNotifications();
   const { mode, toggleTheme } = useTheme();
@@ -186,7 +185,7 @@ export const Feed: React.FC = () => {
                   <Bell size={24} />
                   {unreadCount > 0 && (
                       <span style={{ 
-                          position: 'absolute', top: 0, right: 0, 
+                          position: 'absolute', top: 6, right: 6, 
                           width: '8px', height: '8px', 
                           background: DS.Color.Accent.Surface, 
                           borderRadius: '50%',

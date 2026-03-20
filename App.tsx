@@ -50,10 +50,10 @@ const AnimatedRoutes = () => {
       >
         <Routes location={location}>
           {/* Public Routes */}
+          <Route path="/" element={<Feed />} />
           <Route path="/login" element={<Login />} />
           
           {/* Protected Routes */}
-          <Route path="/" element={<RequireAuth><Feed /></RequireAuth>} />
           <Route path="/profile/:userId" element={<RequireAuth><Profile /></RequireAuth>} />
           <Route path="/post/:postId" element={<RequireAuth><PostDetail /></RequireAuth>} />
           <Route path="/messages" element={<RequireAuth><MessagesList /></RequireAuth>} />

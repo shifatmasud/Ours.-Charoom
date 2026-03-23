@@ -36,7 +36,10 @@ export const Lightbox: React.FC<LightboxProps> = ({ isOpen, src, onClose, type =
           onClick={onClose}
         >
           <button
-            onClick={onClose}
+            onClick={(e) => {
+              e.stopPropagation();
+              onClose();
+            }}
             style={{
               position: 'absolute',
               top: '24px',

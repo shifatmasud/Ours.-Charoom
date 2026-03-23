@@ -129,7 +129,6 @@ export const MessageBubble: React.FC<{
                             setImgSize({ w: img.naturalWidth, h: img.naturalHeight });
                         }
                         setLightboxOpen(true);
-                        if (onImageClick) onImageClick(msg.media_url || '', 'image', `chat-media-${msg.id}`);
                     }}
                     style={{ width: 'auto', height: 'auto', maxWidth: '240px', borderRadius: theme.radius.md, display: 'block', cursor: 'pointer' }} 
                     />

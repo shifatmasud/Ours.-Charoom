@@ -10,9 +10,10 @@ interface LightboxProps {
   onClose: () => void;
   type?: 'image' | 'video';
   layoutId?: string;
+  imgSize?: { w: number, h: number } | null;
 }
 
-export const Lightbox: React.FC<LightboxProps> = ({ isOpen, src, onClose, type = 'image', layoutId }) => {
+export const Lightbox: React.FC<LightboxProps> = ({ isOpen, src, onClose, type = 'image', layoutId, imgSize }) => {
   return (
     <AnimatePresence>
       {isOpen && (
@@ -57,29 +58,44 @@ export const Lightbox: React.FC<LightboxProps> = ({ isOpen, src, onClose, type =
             <X size={24} weight="bold" />
           </button>
 
-          <div
-            style={{ position: 'relative', maxWidth: '100%', maxHeight: '100%' }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {type === 'video' ? (
-               src && <motion.video 
-                 layoutId={layoutId}
-                 src={src} 
-                 controls 
-                 autoPlay 
-                 crossOrigin="anonymous"
-                 style={{ maxWidth: '100%', maxHeight: '90vh', borderRadius: DS.Radius.M }} 
-               />
-            ) : (
-               src && <motion.img 
-                 layoutId={layoutId}
-                 src={src} 
-                 alt="Full view" 
-                 crossOrigin="anonymous"
-                 style={{ maxWidth: '100%', maxHeight: '90vh', objectFit: 'contain', borderRadius: DS.Radius.M }} 
-               />
-            )}
-          </div>
+          {type === 'video' ? (
+             <motion.video 
+               layout
+               layoutId={layoutId}
+               src={src} 
+               controls 
+               autoPlay 
+               crossOrigin="anonymous"
+               onClick={(e) => e.stopPropagation()}
+               style={{ 
+                 width: 'auto',
+                 height: 'auto',
+                 maxWidth: '100%', 
+                 maxHeight: '90vh', 
+                 aspectRatio: imgSize ? `${imgSize.w} / ${imgSize.h}` : undefined,
+                 borderRadius: DS.Radius.M, 
+                 objectFit: 'contain' 
+               }} 
+             />
+          ) : (
+             <motion.img 
+               layout
+               layoutId={layoutId}
+               src={src} 
+               alt="Full view" 
+               crossOrigin="anonymous"
+               onClick={(e) => e.stopPropagation()}
+               style={{ 
+                 width: 'auto',
+                 height: 'auto',
+                 maxWidth: '100%', 
+                 maxHeight: '90vh', 
+                 aspectRatio: imgSize ? `${imgSize.w} / ${imgSize.h}` : undefined,
+                 objectFit: 'contain', 
+                 borderRadius: DS.Radius.M 
+               }} 
+             />
+          )}
         </motion.div>
       )}
     </AnimatePresence>

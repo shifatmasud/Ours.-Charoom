@@ -50,8 +50,14 @@ export const PostCard: React.FC<PostCardProps> = ({ post, currentUser }) => {
     // Fallback
   }
 
+  const [imgSize, setImgSize] = useState<{w: number, h: number} | null>(null);
+
   const handleImageClick = (e: React.MouseEvent) => {
       e.stopPropagation();
+      const img = e.currentTarget.querySelector('img');
+      if (img && img.naturalWidth && img.naturalHeight) {
+          setImgSize({ w: img.naturalWidth, h: img.naturalHeight });
+      }
       setLightboxOpen(true);
   };
 
@@ -179,6 +185,7 @@ export const PostCard: React.FC<PostCardProps> = ({ post, currentUser }) => {
         src={post.image_url} 
         onClose={() => setLightboxOpen(false)} 
         layoutId={`post-media-${post.id}`}
+        imgSize={imgSize}
       />
       
       <motion.article 
@@ -208,6 +215,7 @@ export const PostCard: React.FC<PostCardProps> = ({ post, currentUser }) => {
         >
           {!imageError ? (
             <motion.img 
+              layout
               layoutId={`post-media-${post.id}`}
               src={post.image_url} 
               alt="Moment" 

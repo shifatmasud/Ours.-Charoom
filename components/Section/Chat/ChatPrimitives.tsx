@@ -103,9 +103,9 @@ export const MessageBubble: React.FC<{
             <div 
                 style={{ 
                 padding: p, 
-                width: 'auto',
+                maxwidth: '390px',
                 height: 'auto',
-                fontSize: '15px', 
+                fontSize: '14px', 
                 background: isMe ? theme.colors.surface2 : theme.colors.surface3,
                 color: theme.colors.text1,
                 borderRadius: theme.radius.lg,

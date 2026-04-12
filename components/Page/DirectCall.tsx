@@ -81,26 +81,39 @@ const RemoteVideo: React.FC<{ participant: RemoteParticipant }> = ({ participant
 
   useEffect(() => {
     if (!participant) return;
+    
     const updateTracks = () => {
-      const tracks = participant.videoTracks ? Array.from(participant.videoTracks.values()) : [];
-      console.log(`RemoteVideo: Updating tracks for ${participant.identity}. Found ${tracks.length} video-kind tracks.`);
-      setVideoTracks(tracks.filter((p: RemoteTrackPublication) => p.kind === Track.Kind.Video));
+      // Use trackPublications directly as the most reliable source
+      const pubs = participant.trackPublications ? Array.from(participant.trackPublications.values()) : [];
+      const vTracks = pubs.filter((p: any) => p.kind === Track.Kind.Video) as RemoteTrackPublication[];
+      
+      console.log(`RemoteVideo: Updating tracks for ${participant.identity}. Found ${vTracks.length} video tracks.`);
+      setVideoTracks(vTracks);
     };
 
     participant.on(ParticipantEvent.TrackSubscribed, updateTracks);
     participant.on(ParticipantEvent.TrackUnsubscribed, updateTracks);
     participant.on(ParticipantEvent.TrackPublished, updateTracks);
     participant.on(ParticipantEvent.TrackUnpublished, updateTracks);
+    participant.on(ParticipantEvent.TrackMuted, updateTracks);
+    participant.on(ParticipantEvent.TrackUnmuted, updateTracks);
 
+    // Initial check
     updateTracks();
+    
+    // Sometimes tracks are added slightly after the event fires
+    const timer = setTimeout(updateTracks, 500);
 
     return () => {
+      clearTimeout(timer);
       participant.off(ParticipantEvent.TrackSubscribed, updateTracks);
       participant.off(ParticipantEvent.TrackUnsubscribed, updateTracks);
       participant.off(ParticipantEvent.TrackPublished, updateTracks);
       participant.off(ParticipantEvent.TrackUnpublished, updateTracks);
+      participant.off(ParticipantEvent.TrackMuted, updateTracks);
+      participant.off(ParticipantEvent.TrackUnmuted, updateTracks);
     };
-  }, [participant]);
+  }, [participant, participant.sid]);
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: videoTracks.length > 1 ? '1fr 1fr' : '1fr', height: '100%', width: '100%', background: '#111' }}>
@@ -235,6 +248,16 @@ export const DirectCall: React.FC = () => {
             track.attach();
           }
           // Force a refresh of remote participants to ensure UI picks up the new track
+          if (isMounted) setRemoteParticipants(Array.from(r.remoteParticipants.values()));
+        });
+
+        r.on(RoomEvent.TrackPublished, (publication, participant) => {
+          console.log(`DirectCall: Track published: ${publication.kind} from ${participant.identity}`);
+          if (isMounted) setRemoteParticipants(Array.from(r.remoteParticipants.values()));
+        });
+
+        r.on(RoomEvent.TrackUnpublished, (publication, participant) => {
+          console.log(`DirectCall: Track unpublished: ${publication.kind} from ${participant.identity}`);
           if (isMounted) setRemoteParticipants(Array.from(r.remoteParticipants.values()));
         });
 

@@ -36,13 +36,24 @@ const VideoTrackView: React.FC<{ trackPublication: RemoteTrackPublication; parti
 
   useEffect(() => {
     const el = videoRef.current;
-    if (!el || !trackPublication.track) return;
-    const track = trackPublication.track as RemoteTrack;
-    track.attach(el);
-    return () => {
-      track.detach(el);
+    if (!el) return;
+
+    const attachTrack = () => {
+      if (trackPublication.track) {
+        console.log(`VideoTrackView: Attaching track ${trackPublication.trackSid} from ${participant.identity}`);
+        const track = trackPublication.track as RemoteTrack;
+        track.attach(el);
+      }
     };
-  }, [trackPublication.track]);
+
+    attachTrack();
+
+    return () => {
+      if (trackPublication.track && el) {
+        (trackPublication.track as RemoteTrack).detach(el);
+      }
+    };
+  }, [trackPublication.track, participant.sid]);
 
   return (
     <div style={{ position: 'relative', height: '100%', width: '100%', background: '#111' }}>
@@ -72,6 +83,7 @@ const RemoteVideo: React.FC<{ participant: RemoteParticipant }> = ({ participant
     if (!participant) return;
     const updateTracks = () => {
       const tracks = participant.videoTracks ? Array.from(participant.videoTracks.values()) : [];
+      console.log(`RemoteVideo: Updating tracks for ${participant.identity}. Found ${tracks.length} video-kind tracks.`);
       setVideoTracks(tracks.filter((p: RemoteTrackPublication) => p.kind === Track.Kind.Video));
     };
 
@@ -127,15 +139,20 @@ export const DirectCall: React.FC = () => {
   const localVideoTrackRef = useRef<LocalVideoTrack | null>(null);
   const localAudioTrackRef = useRef<LocalAudioTrack | null>(null);
 
-  // Handle local video attachment when loading state changes or track is created
+  // Handle local video attachment
   useEffect(() => {
-    if (!loading && localVideoRef.current && localVideoTrackRef.current && !isVideoOff) {
-      localVideoTrackRef.current.attach(localVideoRef.current);
-    }
-  }, [loading, isVideoOff]);
+    const attachLocal = async () => {
+      if (localVideoRef.current && localVideoTrackRef.current && !isVideoOff) {
+        console.log('DirectCall: Attaching local video track');
+        localVideoTrackRef.current.attach(localVideoRef.current);
+      }
+    };
+    attachLocal();
+  }, [loading, isVideoOff, localVideoTrackRef.current]);
 
   useEffect(() => {
     if (!roomId || !currentUser) return;
+    let isMounted = true;
 
     const connectToRoom = async () => {
       try {
@@ -148,6 +165,8 @@ export const DirectCall: React.FC = () => {
         } catch (trackError) {
           console.warn('Could not acquire audio device:', trackError);
         }
+
+        if (!isMounted) return;
 
         // 2. Get token from our server
         let roomName = roomId || '';
@@ -163,6 +182,8 @@ export const DirectCall: React.FC = () => {
         const identity = currentUser.username || currentUser.id;
         const response = await fetch(`/api/get-livekit-token?room=${encodeURIComponent(roomName)}&identity=${encodeURIComponent(identity)}`);
         
+        if (!isMounted) return;
+
         // Handle non-JSON responses (e.g. 500 errors from Vercel)
         if (!response.ok) {
           const text = await response.text();
@@ -175,6 +196,7 @@ export const DirectCall: React.FC = () => {
         }
         
         const data = await response.json();
+        if (!isMounted) return;
         
         if (data.error) throw new Error(data.error);
         const { token, serverUrl } = data;
@@ -199,12 +221,12 @@ export const DirectCall: React.FC = () => {
         // 4. Setup Event Listeners
         r.on(RoomEvent.ParticipantConnected, (p) => {
           console.log(`DirectCall: Participant connected: ${p.identity} (${p.sid})`);
-          setRemoteParticipants(prev => [...prev, p]);
+          if (isMounted) setRemoteParticipants(prev => [...prev, p]);
         });
 
         r.on(RoomEvent.ParticipantDisconnected, (p) => {
           console.log(`DirectCall: Participant disconnected: ${p.identity} (${p.sid})`);
-          setRemoteParticipants(prev => prev.filter(part => part.sid !== p.sid));
+          if (isMounted) setRemoteParticipants(prev => prev.filter(part => part.sid !== p.sid));
         });
 
         r.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
@@ -212,6 +234,8 @@ export const DirectCall: React.FC = () => {
           if (track.kind === Track.Kind.Audio) {
             track.attach();
           }
+          // Force a refresh of remote participants to ensure UI picks up the new track
+          if (isMounted) setRemoteParticipants(Array.from(r.remoteParticipants.values()));
         });
 
         r.on(RoomEvent.ConnectionStateChanged, (state) => {
@@ -222,6 +246,8 @@ export const DirectCall: React.FC = () => {
           console.log(`DirectCall: Local track published: ${pub.kind} (${pub.source})`);
           if (pub.source === Track.Source.Camera && pub.track) {
             localVideoTrackRef.current = pub.track as LocalVideoTrack;
+            // Force re-render to trigger the attachment useEffect
+            setIsVideoOff(false); 
             if (localVideoRef.current) {
               pub.track.attach(localVideoRef.current);
             }
@@ -241,12 +267,18 @@ export const DirectCall: React.FC = () => {
         // 5. Connect
         console.log(`DirectCall: Connecting to LiveKit at ${wsUrl}...`);
         await r.connect(wsUrl, token);
+        
+        if (!isMounted) {
+          r.disconnect();
+          return;
+        }
+
         console.log('DirectCall: Connected to room successfully');
         setRoom(r);
 
         // 6. Publish Local Audio Track with a small delay
         setTimeout(async () => {
-          if (roomRef.current?.state !== 'connected') return;
+          if (!isMounted || roomRef.current?.state !== 'connected') return;
           try {
             if (localAudioTrackRef.current) await roomRef.current.localParticipant.publishTrack(localAudioTrackRef.current);
             
@@ -264,6 +296,7 @@ export const DirectCall: React.FC = () => {
         setLoading(false);
 
       } catch (e) {
+        if (!isMounted) return;
         console.error('LiveKit connection error:', e);
         setError((e as Error).message);
         setLoading(false);
@@ -279,6 +312,7 @@ export const DirectCall: React.FC = () => {
     connectToRoom();
 
     return () => {
+      isMounted = false;
       roomRef.current?.disconnect();
       roomRef.current = null;
       localVideoTrackRef.current?.stop();
@@ -315,13 +349,16 @@ export const DirectCall: React.FC = () => {
 
   const toggleVideo = async () => {
     const nextVideoOff = !isVideoOff;
+    console.log(`DirectCall: Toggling video to ${!nextVideoOff ? 'ON' : 'OFF'}`);
     setIsVideoOff(nextVideoOff);
     
     if (room && room.state === 'connected') {
       try {
         await room.localParticipant.setCameraEnabled(!nextVideoOff);
+        console.log(`DirectCall: Camera enabled state set to ${!nextVideoOff}`);
       } catch (e) {
         console.error('Failed to toggle camera:', e);
+        setIsVideoOff(!nextVideoOff); // Rollback
       }
     } else if (localVideoTrackRef.current) {
       try {

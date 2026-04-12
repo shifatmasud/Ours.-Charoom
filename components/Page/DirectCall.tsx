@@ -35,22 +35,29 @@ const VideoTrackView: React.FC<{ trackPublication: RemoteTrackPublication; parti
   const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
-    if (!videoRef.current || !trackPublication.track) return;
+    const el = videoRef.current;
+    if (!el || !trackPublication.track) return;
     const track = trackPublication.track as RemoteTrack;
-    track.attach(videoRef.current);
+    track.attach(el);
     return () => {
-      track.detach(videoRef.current!);
+      track.detach(el);
     };
   }, [trackPublication.track]);
 
   return (
-    <div style={{ position: 'relative', height: '100%', width: '100%' }}>
-      <video 
-        ref={videoRef}
-        autoPlay
-        playsInline
-        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-      />
+    <div style={{ position: 'relative', height: '100%', width: '100%', background: '#111' }}>
+      {trackPublication.track ? (
+        <video 
+          ref={videoRef}
+          autoPlay
+          playsInline
+          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+        />
+      ) : (
+        <div style={{ ...commonStyles.flexCenter, height: '100%', flexDirection: 'column', gap: '16px' }}>
+          <Loader label="Connecting video..." />
+        </div>
+      )}
       <div style={{ position: 'absolute', bottom: '20px', left: '20px', background: 'rgba(0,0,0,0.5)', padding: '4px 12px', borderRadius: '20px', color: '#fff', fontSize: '12px', backdropFilter: 'blur(10px)', zIndex: 10 }}>
         {participant.identity} {trackPublication.source === Track.Source.ScreenShare ? '(Screen)' : ''}
       </div>
@@ -144,7 +151,24 @@ export const DirectCall: React.FC = () => {
         }
 
         // 2. Get token from our server
-        const response = await fetch(`/api/get-livekit-token?room=${roomId}&identity=${currentUser.username || currentUser.id}`);
+        const roomName = roomId === '00000000-0000-0000-0000-000000000000' 
+          ? 'global-call-room' 
+          : [currentUser.id, roomId].sort().join('-');
+          
+        const identity = currentUser.username || currentUser.id;
+        const response = await fetch(`/api/get-livekit-token?room=${encodeURIComponent(roomName)}&identity=${encodeURIComponent(identity)}`);
+        
+        // Handle non-JSON responses (e.g. 500 errors from Vercel)
+        if (!response.ok) {
+          const text = await response.text();
+          try {
+            const data = JSON.parse(text);
+            throw new Error(data.error || 'Failed to get token');
+          } catch (e) {
+            throw new Error(`Server error: ${response.status} ${response.statusText}`);
+          }
+        }
+        
         const data = await response.json();
         
         if (data.error) throw new Error(data.error);
@@ -182,6 +206,15 @@ export const DirectCall: React.FC = () => {
           }
         });
 
+        r.localParticipant.on(ParticipantEvent.LocalTrackPublished, (pub) => {
+          if (pub.source === Track.Source.Camera && pub.track) {
+            localVideoTrackRef.current = pub.track as LocalVideoTrack;
+            if (localVideoRef.current) {
+              pub.track.attach(localVideoRef.current);
+            }
+          }
+        });
+
         // 5. Connect
         await r.connect(wsUrl, token);
         setRoom(r);
@@ -189,9 +222,10 @@ export const DirectCall: React.FC = () => {
         // 6. Publish Local Tracks with a small delay to ensure engine is ready
         // This specifically avoids "publishing rejected as engine not connected within timeout"
         setTimeout(async () => {
+          if (roomRef.current?.state !== 'connected') return;
           try {
-            if (localVideoTrackRef.current) await r.localParticipant.publishTrack(localVideoTrackRef.current);
-            if (localAudioTrackRef.current) await r.localParticipant.publishTrack(localAudioTrackRef.current);
+            if (localVideoTrackRef.current) await roomRef.current.localParticipant.publishTrack(localVideoTrackRef.current);
+            if (localAudioTrackRef.current) await roomRef.current.localParticipant.publishTrack(localAudioTrackRef.current);
           } catch (pubError) {
             console.error('Failed to publish tracks:', pubError);
           }

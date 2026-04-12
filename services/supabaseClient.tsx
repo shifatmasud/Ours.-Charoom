@@ -432,6 +432,15 @@ export const api = {
 
   // --- Profiles ---
   getUserProfile: async (userId: string, existingUser?: any): Promise<Profile> => {
+    if (userId === '00000000-0000-0000-0000-000000000000') {
+        return {
+            id: '00000000-0000-0000-0000-000000000000',
+            username: 'Global Chat',
+            full_name: 'Global Chatroom',
+            avatar_url: `data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' fill='%23ff4f1f'/><text x='50%25' y='54%25' dominant-baseline='middle' text-anchor='middle' font-size='60'>🌎</text></svg>`,
+            bio: 'Welcome to the global chatroom!'
+        };
+    }
     let user = existingUser;
     if (!user) {
         const { data: { user: authUser } } = await supabase.auth.getUser();

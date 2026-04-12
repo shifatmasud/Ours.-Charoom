@@ -53,7 +53,7 @@ export const MessagesList: React.FC = () => {
             id: '00000000-0000-0000-0000-000000000000',
             username: 'Global Chat',
             full_name: 'Global Chatroom',
-            avatar_url: 'https://api.dicebear.com/7.x/shapes/svg?seed=global',
+            avatar_url: `data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' fill='%23ff4f1f'/><text x='50%25' y='54%25' dominant-baseline='middle' text-anchor='middle' font-size='60'>🌎</text></svg>`,
             lastMessage: recentMessages['00000000-0000-0000-0000-000000000000'] || null
         };
 

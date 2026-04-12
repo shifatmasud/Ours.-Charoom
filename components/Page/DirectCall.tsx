@@ -151,13 +151,15 @@ export const DirectCall: React.FC = () => {
         }
 
         // 2. Get token from our server
-        let roomName = '';
-        if (roomId === '00000000-0000-0000-0000-000000000000' || roomId === 'codex-global') {
+        let roomName = roomId || '';
+        if (roomName === '00000000-0000-0000-0000-000000000000' || roomName === 'codex-global') {
           roomName = 'global-call-room';
-        } else {
-          // Ensure consistent P2P room name by sorting IDs
-          roomName = [currentUser.id, roomId].sort().join('-');
+        } else if (roomName && !roomName.includes(currentUser.id)) {
+          // If roomId is just the friend's ID (legacy or direct navigation), construct the composite room name
+          roomName = [currentUser.id, roomName].sort().join('-');
         }
+        
+        console.log(`DirectCall: Connecting to room "${roomName}" with identity "${currentUser.username || currentUser.id}"`);
           
         const identity = currentUser.username || currentUser.id;
         const response = await fetch(`/api/get-livekit-token?room=${encodeURIComponent(roomName)}&identity=${encodeURIComponent(identity)}`);
@@ -197,20 +199,28 @@ export const DirectCall: React.FC = () => {
 
         // 4. Setup Event Listeners
         r.on(RoomEvent.ParticipantConnected, (p) => {
+          console.log(`DirectCall: Participant connected: ${p.identity} (${p.sid})`);
           setRemoteParticipants(prev => [...prev, p]);
         });
 
         r.on(RoomEvent.ParticipantDisconnected, (p) => {
+          console.log(`DirectCall: Participant disconnected: ${p.identity} (${p.sid})`);
           setRemoteParticipants(prev => prev.filter(part => part.sid !== p.sid));
         });
 
-        r.on(RoomEvent.TrackSubscribed, (track) => {
+        r.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
+          console.log(`DirectCall: Track subscribed: ${track.kind} from ${participant.identity}`);
           if (track.kind === Track.Kind.Audio) {
             track.attach();
           }
         });
 
+        r.on(RoomEvent.ConnectionStateChanged, (state) => {
+          console.log(`DirectCall: Connection state changed: ${state}`);
+        });
+
         r.localParticipant.on(ParticipantEvent.LocalTrackPublished, (pub) => {
+          console.log(`DirectCall: Local track published: ${pub.kind} (${pub.source})`);
           if (pub.source === Track.Source.Camera && pub.track) {
             localVideoTrackRef.current = pub.track as LocalVideoTrack;
             if (localVideoRef.current) {
@@ -220,7 +230,9 @@ export const DirectCall: React.FC = () => {
         });
 
         // 5. Connect
+        console.log(`DirectCall: Connecting to LiveKit at ${wsUrl}...`);
         await r.connect(wsUrl, token);
+        console.log('DirectCall: Connected to room successfully');
         setRoom(r);
 
         // 6. Publish Local Tracks with a small delay to ensure engine is ready

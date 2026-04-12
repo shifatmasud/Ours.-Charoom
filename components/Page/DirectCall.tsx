@@ -91,13 +91,14 @@ const RemoteVideo: React.FC<{ participant: RemoteParticipant }> = ({ participant
       setVideoTracks(vTracks);
     };
 
+    // Use string literal for event to avoid TS enum issues if it's missing
+    participant.on('metadataChanged' as any, updateTracks);
     participant.on(ParticipantEvent.TrackSubscribed, updateTracks);
     participant.on(ParticipantEvent.TrackUnsubscribed, updateTracks);
     participant.on(ParticipantEvent.TrackPublished, updateTracks);
     participant.on(ParticipantEvent.TrackUnpublished, updateTracks);
     participant.on(ParticipantEvent.TrackMuted, updateTracks);
     participant.on(ParticipantEvent.TrackUnmuted, updateTracks);
-    participant.on('metadataChanged' as any, updateTracks);
 
     // Initial check
     updateTracks();
@@ -107,13 +108,13 @@ const RemoteVideo: React.FC<{ participant: RemoteParticipant }> = ({ participant
 
     return () => {
       clearTimeout(timer);
+      participant.off('metadataChanged' as any, updateTracks);
       participant.off(ParticipantEvent.TrackSubscribed, updateTracks);
       participant.off(ParticipantEvent.TrackUnsubscribed, updateTracks);
       participant.off(ParticipantEvent.TrackPublished, updateTracks);
       participant.off(ParticipantEvent.TrackUnpublished, updateTracks);
       participant.off(ParticipantEvent.TrackMuted, updateTracks);
       participant.off(ParticipantEvent.TrackUnmuted, updateTracks);
-      participant.off('metadataChanged' as any, updateTracks);
     };
   }, [participant, participant.sid]);
 
@@ -125,16 +126,12 @@ const RemoteVideo: React.FC<{ participant: RemoteParticipant }> = ({ participant
       {videoTracks.length === 0 && (
         <div style={{ ...commonStyles.flexCenter, height: '100%', flexDirection: 'column', gap: '16px', background: '#111' }}>
           <div style={{ width: '100px', height: '100px', borderRadius: '50%', background: '#222', ...commonStyles.flexCenter, overflow: 'hidden', border: '2px solid rgba(255,255,255,0.1)' }}>
-            {participant.metadata ? (
-              <img 
-                src={participant.metadata} 
-                alt={participant.identity} 
-                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                referrerPolicy="no-referrer"
-              />
-            ) : (
-              <User size={40} color="#444" />
-            )}
+            <img 
+              src={participant.metadata || `https://api.dicebear.com/7.x/avataaars/svg?seed=${participant.identity}`} 
+              alt={participant.identity} 
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              referrerPolicy="no-referrer"
+            />
           </div>
           <p style={{ color: '#fff', fontSize: '14px', fontWeight: 500 }}>{participant.identity}</p>
           <p style={{ color: '#666', fontSize: '12px' }}>Voice Only</p>
@@ -274,8 +271,8 @@ export const DirectCall: React.FC = () => {
           if (isMounted) setRemoteParticipants(Array.from(r.remoteParticipants.values()));
         });
 
-        r.on(RoomEvent.ParticipantMetadataChanged, (metadata, participant) => {
-          console.log(`DirectCall: Metadata changed for ${participant?.identity}:`, metadata);
+        r.on(RoomEvent.ParticipantMetadataChanged, (metadata, p) => {
+          console.log(`DirectCall: Participant metadata changed: ${p?.identity}`);
           if (isMounted) setRemoteParticipants(Array.from(r.remoteParticipants.values()));
         });
 

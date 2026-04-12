@@ -136,7 +136,7 @@ export const MessageBubble: React.FC<{
                         }
                         setLightboxOpen(true);
                     }}
-                    style={{ width: 'auto', height: 'auto', maxWidth: '240px', borderRadius: theme.radius.md, display: 'block', cursor: 'pointer' }} 
+                    style={{ width: 'auto', height: 'auto', maxWidth: '240px', borderRadius: '20px', display: 'block', cursor: 'pointer' }} 
                     />
                 ) : msg.type === 'audio' ? (
                     <AudioPlayer src={msg.media_url || ''} />

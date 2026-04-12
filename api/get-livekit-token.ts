@@ -26,8 +26,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const at = new AccessToken(apiKey, apiSecret, {
       identity: identity,
-      metadata: metadata,
     });
+    if (metadata) {
+      at.metadata = metadata;
+    }
     at.addGrant({ roomJoin: true, room: room });
 
     return res.json({ 

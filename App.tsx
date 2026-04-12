@@ -1,6 +1,6 @@
 
 import React, { useEffect, useState } from 'react';
-import { HashRouter as Router, Routes, Route, useLocation, Navigate } from 'react-router-dom';
+import { HashRouter as Router, Routes, Route, useLocation, Navigate, useNavigate } from 'react-router-dom';
 import { Feed } from './components/Section/Feed';
 import { Nav } from './components/Package/Nav';
 import { ChatWindow } from './components/Section/ChatWindow';
@@ -67,8 +67,9 @@ const AnimatedRoutes = () => {
 
 const NotificationContainer = () => {
     const { user } = useAuth();
+    const navigate = useNavigate();
     const { lastActivity } = useNotifications();
-    const [toast, setToast] = useState<{ message: string, visible: boolean, icon?: React.ReactNode, mediaUrl?: string } | null>(null);
+    const [toast, setToast] = useState<{ message: string, visible: boolean, icon?: React.ReactNode, mediaUrl?: string, onClick?: () => void } | null>(null);
 
     useEffect(() => {
         if (!lastActivity) return;
@@ -102,7 +103,22 @@ const NotificationContainer = () => {
         
         if (msg) {
             console.log("NotificationContainer: Setting toast", msg);
-            setToast({ message: msg, visible: true, mediaUrl: media_url });
+            setToast({ 
+                message: msg, 
+                visible: true, 
+                mediaUrl: media_url,
+                onClick: () => {
+                    if (type === 'call') {
+                        navigate(`/call/${lastActivity.reference_id}`);
+                    } else if (type === 'message') {
+                        navigate(`/messages/${sender_id}`);
+                    } else if (type === 'follow') {
+                        navigate(`/profile/${sender_id}`);
+                    } else {
+                        navigate(`/post/${lastActivity.reference_id}`);
+                    }
+                }
+            });
         }
     }, [lastActivity?.id, user?.id]);
 
@@ -126,6 +142,12 @@ const NotificationContainer = () => {
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: -100, scale: 0.9 }}
                     transition={DS.Motion.Spring.Gentle}
+                    onClick={() => {
+                        if (toast.onClick) {
+                            toast.onClick();
+                            setToast(prev => prev ? { ...prev, visible: false } : null);
+                        }
+                    }}
                     style={{ 
                         position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%)', 
                         background: DS.Color.Base.Surface[2], 
@@ -141,7 +163,8 @@ const NotificationContainer = () => {
                         minWidth: '280px',
                         maxWidth: '90vw',
                         backdropFilter: 'blur(12px)',
-                        WebkitBackdropFilter: 'blur(12px)'
+                        WebkitBackdropFilter: 'blur(12px)',
+                        cursor: toast.onClick ? 'pointer' : 'default'
                     }}
                 >
                     <div style={{ flex: 1, fontSize: '13px', fontWeight: 600, letterSpacing: '-0.01em' }}>

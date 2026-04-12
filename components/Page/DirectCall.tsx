@@ -151,9 +151,13 @@ export const DirectCall: React.FC = () => {
         }
 
         // 2. Get token from our server
-        const roomName = roomId === '00000000-0000-0000-0000-000000000000' 
-          ? 'global-call-room' 
-          : [currentUser.id, roomId].sort().join('-');
+        let roomName = '';
+        if (roomId === '00000000-0000-0000-0000-000000000000' || roomId === 'codex-global') {
+          roomName = 'global-call-room';
+        } else {
+          // Ensure consistent P2P room name by sorting IDs
+          roomName = [currentUser.id, roomId].sort().join('-');
+        }
           
         const identity = currentUser.username || currentUser.id;
         const response = await fetch(`/api/get-livekit-token?room=${encodeURIComponent(roomName)}&identity=${encodeURIComponent(identity)}`);

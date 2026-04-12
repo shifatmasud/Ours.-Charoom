@@ -85,11 +85,11 @@ export const ChannelChat: React.FC = () => {
     const startCall = async () => {
         if (!currentUser) return;
         try {
-            await api.sendNotification('codex', currentUser.id, 'call', 'codex-global', undefined, currentUser.username);
+            await api.sendNotification('codex', currentUser.id, 'call', '00000000-0000-0000-0000-000000000000', undefined, currentUser.username);
         } catch (e) {
             console.error("Failed to send call notification", e);
         }
-        navigate(`/call/codex-global`);
+        navigate(`/call/00000000-0000-0000-0000-000000000000`);
     };
 
     return (

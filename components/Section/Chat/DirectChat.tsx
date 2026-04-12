@@ -114,7 +114,9 @@ export const DirectChat: React.FC<DirectChatProps> = ({ friendId }) => {
 
     const startCall = async () => {
         if (!currentUser) return;
-        const roomId = [currentUser.id, friendId].sort().join('-');
+        const roomId = friendId === '00000000-0000-0000-0000-000000000000' 
+            ? '00000000-0000-0000-0000-000000000000'
+            : [currentUser.id, friendId].sort().join('-');
         
         try {
             await api.sendNotification(friendId, currentUser.id, 'call', roomId, undefined, currentUser.username);

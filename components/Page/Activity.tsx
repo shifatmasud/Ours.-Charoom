@@ -42,8 +42,11 @@ export const Activity: React.FC = () => {
 
       if (n.type === 'follow') {
            navigate(`/profile/${n.sender_profile?.id}`);
-      } else if (n.type === 'message' || n.type === 'call') {
+      } else if (n.type === 'message') {
            navigate(`/messages/${n.sender_profile?.id}`);
+      } else if (n.type === 'call') {
+           // For calls, navigate to the room specified in reference_id
+           navigate(`/call/${n.reference_id}`);
       } else {
            navigate(`/post/${n.reference_id}`);
       }

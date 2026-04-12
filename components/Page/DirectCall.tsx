@@ -97,6 +97,7 @@ const RemoteVideo: React.FC<{ participant: RemoteParticipant }> = ({ participant
     participant.on(ParticipantEvent.TrackUnpublished, updateTracks);
     participant.on(ParticipantEvent.TrackMuted, updateTracks);
     participant.on(ParticipantEvent.TrackUnmuted, updateTracks);
+    participant.on('metadataChanged' as any, updateTracks);
 
     // Initial check
     updateTracks();
@@ -112,6 +113,7 @@ const RemoteVideo: React.FC<{ participant: RemoteParticipant }> = ({ participant
       participant.off(ParticipantEvent.TrackUnpublished, updateTracks);
       participant.off(ParticipantEvent.TrackMuted, updateTracks);
       participant.off(ParticipantEvent.TrackUnmuted, updateTracks);
+      participant.off('metadataChanged' as any, updateTracks);
     };
   }, [participant, participant.sid]);
 
@@ -269,6 +271,11 @@ export const DirectCall: React.FC = () => {
 
         r.on(RoomEvent.TrackUnpublished, (publication, participant) => {
           console.log(`DirectCall: Track unpublished: ${publication.kind} from ${participant.identity}`);
+          if (isMounted) setRemoteParticipants(Array.from(r.remoteParticipants.values()));
+        });
+
+        r.on(RoomEvent.ParticipantMetadataChanged, (metadata, participant) => {
+          console.log(`DirectCall: Metadata changed for ${participant?.identity}:`, metadata);
           if (isMounted) setRemoteParticipants(Array.from(r.remoteParticipants.values()));
         });
 

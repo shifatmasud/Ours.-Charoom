@@ -30,8 +30,8 @@ export const MessagesList: React.FC = () => {
         const data = await api.getAllProfiles();
         setProgress(60);
         
-        // Filter out current user
-        const others = data.filter(p => p.id !== currentUser.id);
+        // Filter out current user and the global chat profile (we'll add it manually at the top)
+        const others = data.filter(p => p.id !== currentUser.id && p.id !== '00000000-0000-0000-0000-000000000000');
 
         // Fetch all recent conversations in one go
         const recentMessages = await api.getRecentConversations();
@@ -48,7 +48,16 @@ export const MessagesList: React.FC = () => {
             return timeB - timeA;
         });
 
-        setProfiles(profilesWithMessages);
+        // Add Global Chat at the top
+        const globalChatProfile: ProfileWithMeta = {
+            id: '00000000-0000-0000-0000-000000000000',
+            username: 'Global Chat',
+            full_name: 'Global Chatroom',
+            avatar_url: 'https://api.dicebear.com/7.x/shapes/svg?seed=global',
+            lastMessage: recentMessages['00000000-0000-0000-0000-000000000000'] || null
+        };
+
+        setProfiles([globalChatProfile, ...profilesWithMessages]);
         setProgress(100);
         setLoading(false);
       } catch (e) {

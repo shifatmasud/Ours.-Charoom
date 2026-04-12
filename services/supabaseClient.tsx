@@ -713,9 +713,15 @@ export const api = {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return [];
 
-      const { data, error } = await supabase.from('messages').select('*')
-         .or(`and(sender_id.eq.${user.id},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${user.id})`)
-         .order('created_at', { ascending: true });
+      let query = supabase.from('messages').select('*, sender:profiles!sender_id(*)');
+      
+      if (friendId === '00000000-0000-0000-0000-000000000000') {
+          query = query.eq('receiver_id', friendId);
+      } else {
+          query = query.or(`and(sender_id.eq.${user.id},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${user.id})`);
+      }
+
+      const { data, error } = await query.order('created_at', { ascending: true });
          
       if (error) throw error;
       
@@ -727,11 +733,15 @@ export const api = {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return null;
 
-      const { data, error } = await supabase.from('messages').select('*')
-         .or(`and(sender_id.eq.${user.id},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${user.id})`)
-         .order('created_at', { ascending: false })
-         .limit(1)
-         .single();
+      let query = supabase.from('messages').select('*, sender:profiles!sender_id(*)');
+      
+      if (friendId === '00000000-0000-0000-0000-000000000000') {
+          query = query.eq('receiver_id', friendId);
+      } else {
+          query = query.or(`and(sender_id.eq.${user.id},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${user.id})`);
+      }
+
+      const { data, error } = await query.order('created_at', { ascending: false }).limit(1).single();
          
       if (error || !data) return null;
       return parseMessageContent(data);
@@ -741,8 +751,8 @@ export const api = {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return {};
 
-      const { data, error } = await supabase.from('messages').select('*')
-         .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`)
+      const { data, error } = await supabase.from('messages').select('*, sender:profiles!sender_id(*)')
+         .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id},receiver_id.eq.00000000-0000-0000-0000-000000000000`)
          .order('created_at', { ascending: false })
          .limit(200);
          
@@ -751,7 +761,12 @@ export const api = {
       const latestMessages: Record<string, Message> = {};
       for (const msg of data || []) {
           const parsed = parseMessageContent(msg);
-          const otherId = parsed.sender_id === user.id ? parsed.receiver_id : parsed.sender_id;
+          let otherId;
+          if (parsed.receiver_id === '00000000-0000-0000-0000-000000000000') {
+              otherId = '00000000-0000-0000-0000-000000000000';
+          } else {
+              otherId = parsed.sender_id === user.id ? parsed.receiver_id : parsed.sender_id;
+          }
           if (!latestMessages[otherId]) {
               latestMessages[otherId] = parsed;
           }
@@ -774,13 +789,13 @@ export const api = {
           sender_id: senderId, 
           receiver_id: receiverId, 
           content: finalContent 
-      }).select().single();
+      }).select('*, sender:profiles!sender_id(*)').single();
       
       if (error) throw error;
 
       if (data) {
           // Broadcast the message to the specific chat channel
-          const channelName = receiverId === 'codex' ? 'public-codex-chat' : `dm-${[senderId, receiverId].sort().join('-')}`;
+          const channelName = receiverId === '00000000-0000-0000-0000-000000000000' ? 'public-global-chat' : receiverId === 'codex' ? 'public-codex-chat' : `dm-${[senderId, receiverId].sort().join('-')}`;
           const channel = supabase.channel(channelName);
           channel.subscribe((status) => {
               if (status === 'SUBSCRIBED') {
@@ -794,7 +809,9 @@ export const api = {
               }
           });
 
-          await api.sendNotification(receiverId, senderId, 'message', data.id, mediaUrl, senderUsername);
+          if (receiverId !== '00000000-0000-0000-0000-000000000000') {
+              await api.sendNotification(receiverId, senderId, 'message', data.id, mediaUrl, senderUsername);
+          }
       }
       
       return parseMessageContent(data);

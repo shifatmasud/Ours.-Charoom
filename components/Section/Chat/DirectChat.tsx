@@ -50,14 +50,21 @@ export const DirectChat: React.FC<DirectChatProps> = ({ friendId }) => {
             setFriendProfile(friend);
 
             // Subscribe to DM updates via broadcast
-            const channelName = `dm-${[currentUser.id, friendId].sort().join('-')}`;
+            const channelName = friendId === '00000000-0000-0000-0000-000000000000' ? 'public-global-chat' : `dm-${[currentUser.id, friendId].sort().join('-')}`;
             channel = supabase.channel(channelName)
                .on('broadcast', { event: 'new_message' }, payload => {
                    const msgRaw = payload.payload;
                    const msg = parseMessageContent(msgRaw);
                    
                    // Only add incoming messages from the friend. My own messages are added optimistically.
-                   if (msg.sender_id === friendId && msg.receiver_id === currentUser.id) {
+                   if (friendId === '00000000-0000-0000-0000-000000000000') {
+                       if (msg.sender_id !== currentUser.id) {
+                           setMessages(prev => {
+                               if (prev.find(m => m.id === msg.id)) return prev;
+                               return [...prev, msg];
+                           });
+                       }
+                   } else if (msg.sender_id === friendId && msg.receiver_id === currentUser.id) {
                         setMessages(prev => {
                            // Still good to keep the duplicate check for other race conditions
                            if (prev.find(m => m.id === msg.id)) return prev;
@@ -88,7 +95,8 @@ export const DirectChat: React.FC<DirectChatProps> = ({ friendId }) => {
             content,
             type,
             media_url: mediaUrl,
-            created_at: new Date().toISOString()
+            created_at: new Date().toISOString(),
+            sender: currentUser
         };
         console.log("Adding optimistic message", optimisticMsg);
         setMessages(prev => [...prev, optimisticMsg]);
@@ -142,7 +150,8 @@ export const DirectChat: React.FC<DirectChatProps> = ({ friendId }) => {
                             msg={msg} 
                             isMe={msg.sender_id === currentUser?.id} 
                             onImageClick={(url) => setLightboxSrc(url)}
-                            senderAvatar={friendProfile?.avatar_url}
+                            senderAvatar={msg.sender?.avatar_url || friendProfile?.avatar_url}
+                            senderName={friendId === '00000000-0000-0000-0000-000000000000' ? (msg.sender?.username || 'Unknown') : undefined}
                         />
                     ))}
                     <div ref={messagesEndRef} style={{ height: '1px' }} />

@@ -64,7 +64,8 @@ export const MessageBubble: React.FC<{
     isMe: boolean;
     onImageClick?: (url: string, type?: 'image' | 'video', layoutId?: string) => void;
     senderAvatar?: string;
-}> = ({ msg, isMe, onImageClick, senderAvatar }) => {
+    senderName?: string;
+}> = ({ msg, isMe, onImageClick, senderAvatar, senderName }) => {
     const p = msg.type === 'image' || msg.type === 'audio' ? '4px' : '12px 16px';
     const [lightboxOpen, setLightboxOpen] = useState(false);
     const [imgSize, setImgSize] = useState<{w: number, h: number} | null>(null);
@@ -90,6 +91,11 @@ export const MessageBubble: React.FC<{
             marginBottom: '8px',
           }}
         >
+          {!isMe && senderName && (
+              <span style={{ fontSize: '11px', color: theme.colors.text3, marginLeft: '36px', marginBottom: '2px' }}>
+                  {senderName}
+              </span>
+          )}
           <div style={{ display: 'flex', alignItems: 'flex-end', gap: '8px', flexDirection: isMe ? 'row-reverse' : 'row' }}>
             {!isMe && (
                 <div style={{ width: '24px', height: '24px', borderRadius: '50%', overflow: 'hidden', flexShrink: 0, marginBottom: '4px' }}>

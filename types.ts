@@ -44,6 +44,7 @@ export interface Message {
   created_at: string;
   type?: 'text' | 'image' | 'audio';
   media_url?: string;
+  sender?: Profile;
 }
 
 export interface Notification {

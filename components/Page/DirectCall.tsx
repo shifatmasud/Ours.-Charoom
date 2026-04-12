@@ -71,7 +71,8 @@ const RemoteVideo: React.FC<{ participant: RemoteParticipant }> = ({ participant
   useEffect(() => {
     if (!participant) return;
     const updateTracks = () => {
-      setVideoTracks(Array.from(participant.videoTracks.values()).filter((p: RemoteTrackPublication) => p.kind === Track.Kind.Video));
+      const tracks = participant.videoTracks ? Array.from(participant.videoTracks.values()) : [];
+      setVideoTracks(tracks.filter((p: RemoteTrackPublication) => p.kind === Track.Kind.Video));
     };
 
     participant.on(ParticipantEvent.TrackSubscribed, updateTracks);
@@ -247,7 +248,8 @@ export const DirectCall: React.FC = () => {
           }
         }, 1000);
 
-        setRemoteParticipants(Array.from(r.remoteParticipants.values()));
+        const participants = r.remoteParticipants ? Array.from(r.remoteParticipants.values()) : [];
+        setRemoteParticipants(participants);
         setLoading(false);
 
       } catch (e) {

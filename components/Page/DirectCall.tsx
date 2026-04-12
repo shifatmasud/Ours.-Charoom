@@ -122,10 +122,20 @@ const RemoteVideo: React.FC<{ participant: RemoteParticipant }> = ({ participant
       ))}
       {videoTracks.length === 0 && (
         <div style={{ ...commonStyles.flexCenter, height: '100%', flexDirection: 'column', gap: '16px', background: '#111' }}>
-          <div style={{ width: '60px', height: '60px', borderRadius: '50%', background: '#222', ...commonStyles.flexCenter }}>
-            <User size={30} color="#444" />
+          <div style={{ width: '100px', height: '100px', borderRadius: '50%', background: '#222', ...commonStyles.flexCenter, overflow: 'hidden', border: '2px solid rgba(255,255,255,0.1)' }}>
+            {participant.metadata ? (
+              <img 
+                src={participant.metadata} 
+                alt={participant.identity} 
+                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <User size={40} color="#444" />
+            )}
           </div>
-          <p style={{ color: '#444', fontSize: '12px' }}>{participant.identity} (No Video)</p>
+          <p style={{ color: '#fff', fontSize: '14px', fontWeight: 500 }}>{participant.identity}</p>
+          <p style={{ color: '#666', fontSize: '12px' }}>Voice Only</p>
         </div>
       )}
     </div>
@@ -193,7 +203,8 @@ export const DirectCall: React.FC = () => {
         console.log(`DirectCall: Connecting to room "${roomName}" with identity "${currentUser.username || currentUser.id}"`);
           
         const identity = currentUser.username || currentUser.id;
-        const response = await fetch(`/api/get-livekit-token?room=${encodeURIComponent(roomName)}&identity=${encodeURIComponent(identity)}`);
+        const metadata = currentUser.avatar_url || '';
+        const response = await fetch(`/api/get-livekit-token?room=${encodeURIComponent(roomName)}&identity=${encodeURIComponent(identity)}&metadata=${encodeURIComponent(metadata)}`);
         
         if (!isMounted) return;
 
@@ -459,8 +470,17 @@ export const DirectCall: React.FC = () => {
           </div>
         ) : (
           <div style={{ ...commonStyles.flexCenter, height: '100%', flexDirection: 'column', gap: '24px', background: '#000' }}>
-            <div style={{ width: '100px', height: '100px', borderRadius: '50%', background: '#111', ...commonStyles.flexCenter, border: '1px solid rgba(255,255,255,0.05)' }}>
-              <User size={48} color="#333" />
+            <div style={{ width: '120px', height: '120px', borderRadius: '50%', background: '#111', ...commonStyles.flexCenter, border: '2px solid rgba(255,255,255,0.1)', overflow: 'hidden' }}>
+              {currentUser?.avatar_url ? (
+                <img 
+                  src={currentUser.avatar_url} 
+                  alt="Profile" 
+                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <User size={48} color="#333" />
+              )}
             </div>
             <div style={{ textAlign: 'center' }}>
               <p style={{ color: '#fff', fontSize: '18px', fontWeight: 600, marginBottom: '8px' }}>Waiting for others...</p>
@@ -499,8 +519,17 @@ export const DirectCall: React.FC = () => {
           style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)' }}
         />
         {isVideoOff && (
-          <div style={{ position: 'absolute', inset: 0, background: '#222', ...commonStyles.flexCenter }}>
-            <VideoCameraSlash size={24} color="#666" />
+          <div style={{ position: 'absolute', inset: 0, background: '#222', ...commonStyles.flexCenter, overflow: 'hidden' }}>
+            {currentUser?.avatar_url ? (
+              <img 
+                src={currentUser.avatar_url} 
+                alt="Me" 
+                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <VideoCameraSlash size={24} color="#666" />
+            )}
           </div>
         )}
       </motion.div>

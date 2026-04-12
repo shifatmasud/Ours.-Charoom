@@ -9,6 +9,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const room = req.query.room as string;
   const identity = req.query.identity as string;
+  const metadata = req.query.metadata as string;
 
   if (!room || !identity) {
     return res.status(400).json({ error: "Missing room or identity" });
@@ -25,6 +26,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const at = new AccessToken(apiKey, apiSecret, {
       identity: identity,
+      metadata: metadata,
     });
     at.addGrant({ roomJoin: true, room: room });
 

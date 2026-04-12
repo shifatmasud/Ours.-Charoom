@@ -116,7 +116,7 @@ export const DirectCall: React.FC = () => {
   const [room, setRoom] = useState<Room | null>(null);
   const [remoteParticipants, setRemoteParticipants] = useState<RemoteParticipant[]>([]);
   const [isMuted, setIsMuted] = useState(false);
-  const [isVideoOff, setIsVideoOff] = useState(false);
+  const [isVideoOff, setIsVideoOff] = useState(true);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [isMediaMenuOpen, setIsMediaMenuOpen] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -142,13 +142,11 @@ export const DirectCall: React.FC = () => {
         setLoading(true);
         setError(null);
 
-        // 1. Create local tracks first (better UX + avoids engine race conditions)
+        // 1. Create local audio track first
         try {
-          localVideoTrackRef.current = await createLocalVideoTrack();
           localAudioTrackRef.current = await createLocalAudioTrack();
         } catch (trackError) {
-          console.warn('Could not acquire media devices:', trackError);
-          // We continue even if tracks fail, as user might want to join as listener
+          console.warn('Could not acquire audio device:', trackError);
         }
 
         // 2. Get token from our server
@@ -230,21 +228,34 @@ export const DirectCall: React.FC = () => {
           }
         });
 
+        r.localParticipant.on(ParticipantEvent.LocalTrackUnpublished, (pub) => {
+          console.log(`DirectCall: Local track unpublished: ${pub.kind} (${pub.source})`);
+          if (pub.source === Track.Source.Camera) {
+            if (localVideoRef.current && localVideoTrackRef.current) {
+              localVideoTrackRef.current.detach(localVideoRef.current);
+            }
+            localVideoTrackRef.current = null;
+          }
+        });
+
         // 5. Connect
         console.log(`DirectCall: Connecting to LiveKit at ${wsUrl}...`);
         await r.connect(wsUrl, token);
         console.log('DirectCall: Connected to room successfully');
         setRoom(r);
 
-        // 6. Publish Local Tracks with a small delay to ensure engine is ready
-        // This specifically avoids "publishing rejected as engine not connected within timeout"
+        // 6. Publish Local Audio Track with a small delay
         setTimeout(async () => {
           if (roomRef.current?.state !== 'connected') return;
           try {
-            if (localVideoTrackRef.current) await roomRef.current.localParticipant.publishTrack(localVideoTrackRef.current);
             if (localAudioTrackRef.current) await roomRef.current.localParticipant.publishTrack(localAudioTrackRef.current);
+            
+            // If user somehow enabled video during connection, enable it now
+            if (!isVideoOff) {
+              await roomRef.current.localParticipant.setCameraEnabled(true);
+            }
           } catch (pubError) {
-            console.error('Failed to publish tracks:', pubError);
+            console.error('Failed to publish initial tracks:', pubError);
           }
         }, 1000);
 

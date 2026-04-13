@@ -449,8 +449,19 @@ export const api = {
     
     try {
         const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000));
+        
+        // Check if userId is a UUID
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId);
+        
+        let query = supabase.from('profiles').select('*');
+        if (isUuid) {
+            query = query.eq('id', userId);
+        } else {
+            query = query.eq('username', userId);
+        }
+
         const { data, error } = await Promise.race([
-            supabase.from('profiles').select('*').eq('id', userId).single(),
+            query.maybeSingle(),
             timeout
         ]) as any;
         
@@ -459,6 +470,10 @@ export const api = {
                 return MOCK_USER;
             }
             throw error;
+        }
+
+        if (!data) {
+            throw new Error('User not found');
         }
 
         // Fetch real-time counts from the source of truth

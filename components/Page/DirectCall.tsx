@@ -30,6 +30,7 @@ import {
 import { theme, DS, commonStyles } from '../../Theme';
 import { useAuth } from '../../contexts/AuthContext';
 import { Loader } from '../Core/Loader';
+import { api } from '../../services/supabaseClient';
 
 const VideoTrackView: React.FC<{ trackPublication: RemoteTrackPublication; participant: RemoteParticipant }> = ({ trackPublication, participant }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -78,20 +79,26 @@ const VideoTrackView: React.FC<{ trackPublication: RemoteTrackPublication; parti
 
 const RemoteVideo: React.FC<{ participant: RemoteParticipant }> = ({ participant }) => {
   const [videoTracks, setVideoTracks] = useState<RemoteTrackPublication[]>([]);
+  const [avatarUrl, setAvatarUrl] = useState<string | undefined>(participant.metadata?.split('|')[0]);
+  const [username, setUsername] = useState<string | undefined>(participant.metadata?.split('|')[1] || participant.identity);
 
   useEffect(() => {
     if (!participant) return;
     
     const updateTracks = () => {
-      // Use trackPublications directly as the most reliable source
       const pubs = participant.trackPublications ? Array.from(participant.trackPublications.values()) : [];
       const vTracks = pubs.filter((p: any) => p.kind === Track.Kind.Video) as RemoteTrackPublication[];
-      
-      console.log(`RemoteVideo: Updating tracks for ${participant.identity}. Found ${vTracks.length} video tracks.`);
       setVideoTracks(vTracks);
     };
 
-    // Use string literal for event to avoid TS enum issues if it's missing
+    // Fetch profile if avatar is missing
+    if (!avatarUrl) {
+      api.getUserProfile(participant.identity).then(profile => {
+        setAvatarUrl(profile.avatar_url);
+        setUsername(profile.username);
+      }).catch(err => console.error("Failed to fetch remote profile:", err));
+    }
+
     participant.on('metadataChanged' as any, updateTracks);
     participant.on(ParticipantEvent.TrackSubscribed, updateTracks);
     participant.on(ParticipantEvent.TrackUnsubscribed, updateTracks);
@@ -100,10 +107,8 @@ const RemoteVideo: React.FC<{ participant: RemoteParticipant }> = ({ participant
     participant.on(ParticipantEvent.TrackMuted, updateTracks);
     participant.on(ParticipantEvent.TrackUnmuted, updateTracks);
 
-    // Initial check
     updateTracks();
     
-    // Sometimes tracks are added slightly after the event fires
     const timer = setTimeout(updateTracks, 500);
 
     return () => {
@@ -116,7 +121,7 @@ const RemoteVideo: React.FC<{ participant: RemoteParticipant }> = ({ participant
       participant.off(ParticipantEvent.TrackMuted, updateTracks);
       participant.off(ParticipantEvent.TrackUnmuted, updateTracks);
     };
-  }, [participant, participant.sid]);
+  }, [participant, participant.sid, avatarUrl]);
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: videoTracks.length > 1 ? '1fr 1fr' : '1fr', height: '100%', width: '100%', background: '#111' }}>
@@ -127,13 +132,13 @@ const RemoteVideo: React.FC<{ participant: RemoteParticipant }> = ({ participant
         <div style={{ ...commonStyles.flexCenter, height: '100%', flexDirection: 'column', gap: '16px', background: '#111' }}>
           <div style={{ width: '100px', height: '100px', borderRadius: '50%', background: '#222', ...commonStyles.flexCenter, overflow: 'hidden', border: '2px solid rgba(255,255,255,0.1)' }}>
             <img 
-              src={participant.metadata || `https://api.dicebear.com/7.x/avataaars/svg?seed=${participant.identity}`} 
-              alt={participant.identity} 
+              src={avatarUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${participant.identity}`} 
+              alt={username} 
               style={{ width: '100%', height: '100%', objectFit: 'cover' }}
               referrerPolicy="no-referrer"
             />
           </div>
-          <p style={{ color: '#fff', fontSize: '14px', fontWeight: 500 }}>{participant.identity}</p>
+          <p style={{ color: '#fff', fontSize: '14px', fontWeight: 500 }}>{username}</p>
           <p style={{ color: '#666', fontSize: '12px' }}>Voice Only</p>
         </div>
       )}
@@ -201,8 +206,8 @@ export const DirectCall: React.FC = () => {
         
         console.log(`DirectCall: Connecting to room "${roomName}" with identity "${currentUser.username || currentUser.id}"`);
           
-        const identity = currentUser.username || currentUser.id;
-        const metadata = currentUser.avatar_url || '';
+        const identity = currentUser.id;
+        const metadata = `${currentUser.avatar_url || ''}|${currentUser.username || ''}`;
         const response = await fetch(`/api/get-livekit-token?room=${encodeURIComponent(roomName)}&identity=${encodeURIComponent(identity)}&metadata=${encodeURIComponent(metadata)}`);
         
         if (!isMounted) return;

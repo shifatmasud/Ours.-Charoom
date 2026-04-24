@@ -57,7 +57,7 @@ const VideoTrackView: React.FC<{ trackPublication: RemoteTrackPublication; parti
   }, [trackPublication.track, participant.sid]);
 
   return (
-    <div style={{ position: 'relative', height: '100%', width: '100%', background: '#111' }}>
+    <div style={{ position: 'relative', height: '100%', width: '100%', background: 'transparent' }}>
       {trackPublication.track ? (
         <video 
           ref={videoRef}
@@ -70,7 +70,7 @@ const VideoTrackView: React.FC<{ trackPublication: RemoteTrackPublication; parti
           <Loader label="Connecting video..." />
         </div>
       )}
-      <div style={{ position: 'absolute', bottom: '20px', left: '20px', background: 'rgba(0,0,0,0.5)', padding: '4px 12px', borderRadius: '20px', color: '#fff', fontSize: '12px', backdropFilter: 'blur(10px)', zIndex: 10 }}>
+      <div style={{ position: 'absolute', bottom: '16px', left: '16px', background: 'rgba(0,0,0,0.5)', padding: '4px 12px', borderRadius: '20px', color: '#fff', fontSize: '12px', backdropFilter: 'blur(10px)', zIndex: 10 }}>
         {participant.identity} {trackPublication.source === Track.Source.ScreenShare ? '(Screen)' : ''}
       </div>
     </div>
@@ -140,12 +140,12 @@ const RemoteVideo: React.FC<{ participant: RemoteParticipant }> = ({ participant
   }, [participant, participant.sid]);
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: videoTracks.length > 1 ? '1fr 1fr' : '1fr', height: '100%', width: '100%', background: '#111' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: videoTracks.length > 1 ? '1fr 1fr' : '1fr', height: '100%', width: '100%', background: 'transparent' }}>
       {videoTracks.map(pub => (
         <VideoTrackView key={pub.trackSid} trackPublication={pub} participant={participant} />
       ))}
       {videoTracks.length === 0 && (
-        <div style={{ ...commonStyles.flexCenter, height: '100%', flexDirection: 'column', gap: '16px', background: '#111' }}>
+        <div style={{ ...commonStyles.flexCenter, height: '100%', flexDirection: 'column', gap: '16px', background: 'transparent' }}>
           <div style={{ width: '100px', height: '100px', borderRadius: '50%', background: '#222', ...commonStyles.flexCenter, overflow: 'hidden', border: '2px solid rgba(255,255,255,0.1)' }}>
             <img 
               src={avatarUrl || participant.metadata || `https://api.dicebear.com/7.x/avataaars/svg?seed=${participant.identity}`} 
@@ -485,79 +485,133 @@ export const DirectCall: React.FC = () => {
   return (
     <div ref={containerRef} style={{ position: 'fixed', inset: 0, background: '#000', zIndex: 9999, overflow: 'hidden' }}>
       
-      {/* Remote Video (Main View) */}
-      <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-        {remoteParticipants.length > 0 ? (
-          <div style={{ display: 'grid', gridTemplateColumns: remoteParticipants.length > 1 ? '1fr 1fr' : '1fr', height: '100%', width: '100%' }}>
-            {remoteParticipants.map(p => (
-              <RemoteVideo key={p.sid} participant={p} />
-            ))}
-          </div>
-        ) : (
-          <div style={{ ...commonStyles.flexCenter, height: '100%', flexDirection: 'column', gap: '24px', background: '#000' }}>
-            <div style={{ width: '120px', height: '120px', borderRadius: '50%', background: '#111', ...commonStyles.flexCenter, border: '2px solid rgba(255,255,255,0.1)', overflow: 'hidden' }}>
-              {currentUser?.avatar_url ? (
-                <img 
-                  src={currentUser.avatar_url} 
-                  alt="Profile" 
-                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                  referrerPolicy="no-referrer"
-                />
-              ) : (
-                <User size={48} color="#333" />
-              )}
-            </div>
-            <div style={{ textAlign: 'center' }}>
-              <p style={{ color: '#fff', fontSize: '18px', fontWeight: 600, marginBottom: '8px' }}>Waiting for others...</p>
-              <p style={{ color: '#666', fontSize: '14px' }}>The call will start as soon as they join</p>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Local Video (PIP) */}
+      {/* Responsive Grid View */}
       <motion.div 
-        drag
-        dragConstraints={containerRef}
-        dragElastic={0.1}
-        dragMomentum={false}
+        layout
         style={{ 
-          position: 'absolute', 
-          bottom: '120px', 
-          right: '20px', 
-          width: '120px', 
-          height: '180px', 
-          borderRadius: '16px', 
-          overflow: 'hidden', 
-          background: '#222',
-          boxShadow: '0 10px 30px rgba(0,0,0,0.5)',
-          border: '1px solid rgba(255,255,255,0.1)',
-          zIndex: 100,
-          touchAction: 'none'
-        }}
-      >
-        <video 
-          ref={localVideoRef}
-          autoPlay
-          playsInline
-          muted
-          style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)' }}
-        />
-        {isVideoOff && (
-          <div style={{ position: 'absolute', inset: 0, background: '#222', ...commonStyles.flexCenter, overflow: 'hidden' }}>
-            {currentUser?.avatar_url ? (
-              <img 
-                src={currentUser.avatar_url} 
-                alt="Me" 
-                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                referrerPolicy="no-referrer"
-              />
-            ) : (
-              <VideoCameraSlash size={24} color="#666" />
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: '12px',
+          padding: '12px',
+          paddingTop: '80px',
+          paddingBottom: '140px',
+          width: '100vw',
+          height: '100vh',
+          boxSizing: 'border-box',
+          alignContent: 'stretch',
+          alignItems: 'stretch'
+        }}>
+        <AnimatePresence>
+          {/* Local Participant Cell */}
+          <motion.div 
+            layout
+            key="local-participant"
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.8 }}
+            transition={{ type: "spring", bounce: 0, duration: 0.4 }}
+            style={{
+              flex: '1 1 min(100%, 300px)',
+              minHeight: '200px',
+              borderRadius: '24px',
+              overflow: 'hidden',
+              position: 'relative',
+              background: '#1a1a1a',
+              border: '1px solid rgba(255,255,255,0.05)',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'center',
+              alignItems: 'center'
+            }}
+          >
+            <video 
+              ref={localVideoRef}
+              autoPlay
+              playsInline
+              muted
+              style={{ 
+                width: '100%', 
+                height: '100%', 
+                objectFit: 'cover', 
+                transform: 'scaleX(-1)',
+                display: isVideoOff ? 'none' : 'block'
+              }}
+            />
+            {isVideoOff && (
+              <div style={{ ...commonStyles.flexCenter, height: '100%', flexDirection: 'column', gap: '16px' }}>
+                <div style={{ width: '100px', height: '100px', borderRadius: '50%', background: '#222', ...commonStyles.flexCenter, overflow: 'hidden', border: '2px solid rgba(255,255,255,0.1)' }}>
+                  {currentUser?.avatar_url ? (
+                    <img 
+                      src={currentUser.avatar_url} 
+                      alt="Me" 
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <User size={40} color="#666" />
+                  )}
+                </div>
+                <p style={{ color: '#fff', fontSize: '14px', fontWeight: 500 }}>You (Muted)</p>
+              </div>
             )}
-          </div>
-        )}
+            {!isVideoOff && (
+               <div style={{ position: 'absolute', bottom: '16px', left: '16px', background: 'rgba(0,0,0,0.5)', padding: '4px 12px', borderRadius: '20px', color: '#fff', fontSize: '12px', backdropFilter: 'blur(10px)', zIndex: 10, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                 You {isMuted && <MicrophoneSlash size={14} color={DS.Color.Status.Error} />}
+               </div>
+            )}
+          </motion.div>
+
+          {/* Remote Participants Cells */}
+          {remoteParticipants.map(p => (
+            <motion.div 
+              layout
+              key={p.sid}
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.8 }}
+              transition={{ type: "spring", bounce: 0, duration: 0.4 }}
+              style={{
+                flex: '1 1 min(100%, 300px)',
+                minHeight: '200px',
+                borderRadius: '24px',
+                overflow: 'hidden',
+                position: 'relative',
+                background: '#1a1a1a',
+                border: '1px solid rgba(255,255,255,0.05)',
+              }}
+            >
+              <RemoteVideo participant={p} />
+            </motion.div>
+          ))}
+        </AnimatePresence>
       </motion.div>
+
+      {/* Waiting Indicator */}
+      <AnimatePresence>
+        {remoteParticipants.length === 0 && (
+          <motion.div 
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            style={{
+              position: 'absolute',
+              top: '100px',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              background: 'rgba(0,0,0,0.6)',
+              padding: '8px 24px',
+              borderRadius: '24px',
+              color: '#fff',
+              fontSize: '14px',
+              backdropFilter: 'blur(10px)',
+              zIndex: 100,
+              pointerEvents: 'none'
+            }}
+          >
+            Waiting for others to join...
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Media Menu (Moved outside to fix backdrop-filter issues) */}
       <AnimatePresence>

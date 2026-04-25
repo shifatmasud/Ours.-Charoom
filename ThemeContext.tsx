@@ -73,8 +73,8 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           ]
         },
         {
-          duration: 750,
-          easing: 'cubic-bezier(0.25, 1, 0.5, 1)',
+          duration: 700,
+          easing: 'ease-in-out',
           pseudoElement: '::view-transition-new(root)'
         }
       );

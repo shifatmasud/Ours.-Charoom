@@ -5,7 +5,7 @@ import { ParticleBurst } from './ParticleBurst';
 import { StateLayer } from './StateLayer';
 
 interface ButtonProps {
-  onClick?: () => void;
+  onClick?: (event?: React.MouseEvent) => void;
   children: React.ReactNode;
   variant?: 'primary' | 'secondary' | 'ghost' | 'icon';
   size?: 'sm' | 'md' | 'lg' | 'icon';
@@ -41,7 +41,7 @@ export const Button: React.FC<ButtonProps> = ({
       setShowBurst(true);
       setTimeout(() => setShowBurst(false), 500);
     }
-    onClick?.();
+    onClick?.(e);
   };
 
   const handlePointerEnter = (e: React.PointerEvent<HTMLButtonElement>) => {

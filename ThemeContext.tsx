@@ -6,7 +6,7 @@ type ThemeMode = 'dark' | 'light';
 
 interface ThemeContextType {
   mode: ThemeMode;
-  toggleTheme: () => void;
+  toggleTheme: (event?: React.MouseEvent | any) => void;
 }
 
 const ThemeContext = createContext<ThemeContextType>({ mode: 'dark', toggleTheme: () => {} });
@@ -44,8 +44,41 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, [mode]);
 
-  const toggleTheme = () => {
-    setMode(prev => prev === 'dark' ? 'light' : 'dark');
+  const toggleTheme = (event?: React.MouseEvent) => {
+    const nextMode = mode === 'dark' ? 'light' : 'dark';
+    const isDark = mode === 'dark'; // before change
+
+    if (!document.startViewTransition || !event) {
+      setMode(nextMode);
+      return;
+    }
+
+    const x = event.clientX;
+    const y = event.clientY;
+    const endRadius = Math.hypot(
+      Math.max(x, innerWidth - x),
+      Math.max(y, innerHeight - y)
+    );
+
+    const transition = document.startViewTransition(() => {
+      setMode(nextMode);
+    });
+
+    transition.ready.then(() => {
+      document.documentElement.animate(
+        {
+          clipPath: [
+            `circle(0px at ${x}px ${y}px)`,
+            `circle(${endRadius}px at ${x}px ${y}px)`
+          ]
+        },
+        {
+          duration: 400,
+          easing: 'ease-in-out',
+          pseudoElement: '::view-transition-new(root)'
+        }
+      );
+    });
   };
 
   return (
